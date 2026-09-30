@@ -95,24 +95,17 @@ function worstBadge(systems) {
   return `<span class="badge ${st.cls}">${esc(st.text)}</span>`;
 }
 
-// ---------- Startseite: nächste fällige Wartungen + Kunden ----------
+// ---------- Startseite: nächste Dichtheitskontrollen, nächste Wartungen, Kunden ----------
 const HOME_LIMIT = 10;
 
 function viewHome(q) {
   const st = Store.get();
   const term = (q.get('q') || '').toLowerCase();
-  const showAll = q.get('alle') === '1';
+  const showAll = q.get('alle') || '';
   const customers = [...st.customers]
     .filter((c) => !term || [c.name, c.ansprechpartner, c.ort, c.strasse, c.kundennr,
       ...Store.locationsOf(c.id).map((l) => [l.name, l.ort, l.strasse].join(' '))].join(' ').toLowerCase().includes(term))
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'));
-
-  // nur prüfpflichtige Anlagen (Dichtheitskontrolle bzw. Nachkontrolle nach Leckage)
-  const due = st.systems.map((s) => ({ s, d: FGas.nextDue(s, Store.entriesOf(s.id)) })).filter((x) => x.d);
-  const dated = due.filter((x) => x.d.date).sort((a, b) => a.d.date.localeCompare(b.d.date));
-  const open = due.filter((x) => !x.d.date);
-  const shown = showAll ? dated : dated.slice(0, HOME_LIMIT);
-  const overdue = dated.filter((x) => x.d.date < today()).length;
 
   const dueRow = ({ s, d }) => {
     const c = Store.customer(s.customerId);
@@ -127,18 +120,44 @@ function viewHome(q) {
       <span class="chev">›</span></a></li>`;
   };
 
+  /** Terminliste (Dichtheitskontrollen bzw. Wartungen) mit „Alle anzeigen“ und Anlagen ohne Termin. */
+  const dueSection = ({ key, title, calc, emptyText, openText }) => {
+    const due = st.systems.map((s) => ({ s, d: calc(s, Store.entriesOf(s.id)) })).filter((x) => x.d);
+    const dated = due.filter((x) => x.d.date).sort((a, b) => a.d.date.localeCompare(b.d.date));
+    const open = due.filter((x) => !x.d.date);
+    const all = showAll === key;
+    const shown = all ? dated : dated.slice(0, HOME_LIMIT);
+    const overdue = dated.filter((x) => x.d.date < today()).length;
+    const toggle = new URLSearchParams(term ? { q: q.get('q') } : {});
+    if (!all) toggle.set('alle', key);
+    return `
+      <div class="head-row" style="margin-top:8px"><h1>${title}</h1></div>
+      ${overdue ? `<div class="notice danger"><strong>${overdue} ${overdue === 1 ? 'Termin ist' : 'Termine sind'} überfällig.</strong></div>` : ''}
+      ${dated.length ? `<ul class="list">${shown.map(dueRow).join('')}</ul>
+        ${dated.length > HOME_LIMIT ? `<div class="actions" style="margin-top:0">
+          <a class="btn small" href="#/?${toggle}">${all ? 'Weniger anzeigen' : `Alle ${dated.length} Termine anzeigen`}</a></div>` : ''}`
+      : `<div class="empty">${emptyText}</div>`}
+      ${open.length ? `<details class="card" style="margin-top:12px"><summary><strong>${open.length} Anlage(n) ohne Termin</strong>
+        <span class="muted small"> – ${openText}</span></summary>
+        <ul class="list" style="margin-top:10px">${open.map(dueRow).join('')}</ul></details>` : ''}
+      <div style="height:16px"></div>`;
+  };
+
   render(`
-    <div class="head-row">
-      <h1>Nächste Dichtheitskontrollen</h1>
-    </div>
-    ${overdue ? `<div class="notice danger"><strong>${overdue} ${overdue === 1 ? 'Termin ist' : 'Termine sind'} überfällig.</strong></div>` : ''}
-    ${dated.length ? `<ul class="list">${shown.map(dueRow).join('')}</ul>
-      ${dated.length > HOME_LIMIT ? `<div class="actions" style="margin-top:0">
-        <a class="btn small" href="#/?${showAll ? '' : 'alle=1'}">${showAll ? 'Weniger anzeigen' : `Alle ${dated.length} Termine anzeigen`}</a></div>` : ''}`
-    : `<div class="empty">Keine anstehenden Dichtheitskontrollen. Termine entstehen automatisch für prüfpflichtige Anlagen (ab 5 t CO2-Äquivalent) aus dem Prüfintervall und den Einträgen.</div>`}
-    ${open.length ? `<details class="card" style="margin-top:12px"><summary><strong>${open.length} Anlage(n) ohne Termin</strong>
-      <span class="muted small"> – noch keine Dichtheitskontrolle und kein Errichtungsdatum erfasst</span></summary>
-      <ul class="list" style="margin-top:10px">${open.map(dueRow).join('')}</ul></details>` : ''}
+    ${dueSection({
+      key: 'dk',
+      title: 'Nächste Dichtheitskontrollen',
+      calc: FGas.nextDue,
+      emptyText: 'Keine anstehenden Dichtheitskontrollen. Termine entstehen automatisch für prüfpflichtige Anlagen (ab 5 t CO2-Äquivalent) aus dem Prüfintervall und den Einträgen.',
+      openText: 'noch keine Dichtheitskontrolle und kein Errichtungsdatum erfasst',
+    })}
+    ${dueSection({
+      key: 'wa',
+      title: 'Nächste Wartungen',
+      calc: FGas.nextMaintenance,
+      emptyText: 'Keine anstehenden Wartungen. Termine entstehen aus dem Wartungsintervall der Anlagen und den eingetragenen Wartungen.',
+      openText: 'noch keine Wartung und kein Errichtungsdatum erfasst',
+    })}
 
     <div class="head-row" style="margin-top:24px">
       <h1>Kunden</h1>
@@ -160,7 +179,7 @@ function viewHome(q) {
   const s = document.getElementById('search');
   s.addEventListener('input', () => {
     const qs = new URLSearchParams({ q: s.value });
-    if (showAll) qs.set('alle', '1');
+    if (showAll) qs.set('alle', showAll);
     history.replaceState(null, '', '#/?' + qs);
     const pos = s.selectionStart;
     viewHome(qs);
