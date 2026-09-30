@@ -1,5 +1,5 @@
 /* Offline-Cache für die App-Dateien. Bei Änderungen VERSION erhöhen. */
-const VERSION = 'anlagenbuch-v10';
+const VERSION = 'anlagenbuch-v11';
 const FILES = [
   './',
   'index.html',
@@ -7,6 +7,7 @@ const FILES = [
   'manifest.webmanifest',
   'js/files.js',
   'js/data.js',
+  'js/sync.js',
   'js/areas.js',
   'js/signature.js',
   'js/pdf.js',
@@ -33,7 +34,9 @@ self.addEventListener('activate', (e) => {
 
 // Netzwerk zuerst (damit Updates ankommen), offline aus dem Cache
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
+  const url = new URL(e.request.url);
+  // Server-Schnittstelle nie aus dem Cache bedienen
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/')) return;
   e.respondWith(
     fetch(e.request)
       .then((res) => {

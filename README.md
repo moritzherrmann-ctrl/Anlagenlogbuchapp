@@ -66,6 +66,17 @@ die Aufzeichnungen müssen mindestens 5 Jahre aufbewahrt werden.
 - Verwendete Bibliotheken: [jsPDF](https://github.com/parallax/jsPDF) und
   [jsPDF-AutoTable](https://github.com/simonbengtsson/jsPDF-AutoTable) (MIT, im Ordner `vendor/`).
 
+## Eigener Server: Benutzer & zentrale Datenhaltung
+
+Optional kann die App mit einem eigenen Server betrieben werden (Ordner `server/`, Start per Docker):
+
+- **Benutzer mit Anmeldung** (Administrator / Techniker), Benutzerverwaltung in der App
+- **Zentrale Speicherung** aller Kunden, Anlagen und Protokolle auf dem eigenen Server, tägliche Sicherung
+- **Abgleich** zwischen allen Geräten und Benutzern; die App funktioniert weiter **offline** und lädt
+  Änderungen hoch, sobald wieder eine Verbindung besteht
+
+Anleitung: [server/README.md](server/README.md). Ohne Server arbeitet die App wie bisher nur lokal.
+
 ## Android-App (APK)
 
 Die Web-App wird mit [Capacitor](https://capacitorjs.com) in eine Android-App verpackt.

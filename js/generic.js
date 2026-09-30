@@ -179,7 +179,7 @@ const Generic = (() => {
       datum: today(),
       taetigkeit: area.taetigkeiten[0],
       fachbetrieb: settings.firma,
-      techniker: settings.techniker,
+      techniker: Sync.user ? Sync.user.name : settings.techniker,
       arbeiten: [],
     };
     const done = new Set(v.arbeiten || []);

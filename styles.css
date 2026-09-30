@@ -213,3 +213,16 @@ details summary { cursor: pointer; }
 .checks .check { min-height: 36px; }
 ul.plain { list-style: none; margin: 0; padding: 0; }
 .spec[hidden] { display: none; }
+
+/* Server-Abgleich & Anmeldung */
+.sync-state { display: inline-flex; align-items: center; gap: 6px; }
+.sync-state .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.sync-state.ok .dot { background: var(--ok); }
+.sync-state.läuft .dot { background: var(--primary); animation: pulse 1s infinite alternate; }
+.sync-state.offline .dot { background: var(--warn); }
+.sync-state.fehler .dot, .sync-state.aus .dot { background: var(--danger); }
+.sync-state .label { font-size: .8rem; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 480px) { .sync-state .label { display: none; } .topnav a { padding: 6px 8px; } }
+@keyframes pulse { from { opacity: .4; } to { opacity: 1; } }
+.login-card { max-width: 420px; margin: 32px auto; }
+.error { color: var(--danger); font-size: .9rem; min-height: 1.2em; }

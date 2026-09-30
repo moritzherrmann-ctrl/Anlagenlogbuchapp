@@ -629,8 +629,8 @@ function viewEntryForm(id, q) {
     datum: today(),
     taetigkeit: 'Dichtheitskontrolle',
     fachbetrieb: `${settings.firma} (Zert.-Nr. ${settings.zertifikatNr})`,
-    techniker: settings.techniker,
-    technikerZertNr: settings.technikerZertNr,
+    techniker: Sync.user ? Sync.user.name : settings.techniker,
+    technikerZertNr: Sync.user ? Sync.user.zertNr : settings.technikerZertNr,
     herkunft: '',
     ergebnis: '',
   };
@@ -777,7 +777,7 @@ function viewEntry(id) {
     const cur = Store.entry(id);
     delete cur.sigTechniker;
     delete cur.sigKunde;
-    await Store.save();
+    await Store.touch('entries', id);
     toast('Unterschriften entfernt');
     viewEntry(id);
   });
@@ -821,12 +821,218 @@ const Signature = (() => {
   return { open };
 })();
 
+// ---------- Anmeldung am eigenen Server ----------
+const chooseUpload = (n) => confirm(`Auf dem Server sind bereits ${n} Datensätze gespeichert.\n\n`
+  + 'OK = die Daten dieses Geräts zusätzlich hochladen (zusammenführen)\n'
+  + 'Abbrechen = nur die Serverdaten verwenden (die lokalen Daten dieses Geräts werden entfernt)');
+
+function viewLogin() {
+  const setup = Sync.needsSetup;
+  render(`
+    <form id="f" class="card login-card">
+      <h1>${setup ? 'Ersten Administrator anlegen' : 'Anmelden'}</h1>
+      <p class="muted small">${setup
+        ? 'Auf diesem Server gibt es noch keine Benutzer. Lege jetzt deinen Administrator-Zugang an – damit kannst du danach weitere Benutzer anlegen.'
+        : `Server: ${esc(Sync.server)}`}</p>
+      <div class="grid" style="grid-template-columns:minmax(0,1fr)">
+        ${setup ? field('name', 'Name (erscheint in Protokollen)', Store.get().settings.techniker, { required: true }) : ''}
+        ${field('username', 'Benutzername', '', { required: true, attrs: 'autocomplete="username" autocapitalize="none"' })}
+        ${field('password', 'Passwort', '', { type: 'password', required: true, attrs: `autocomplete="${setup ? 'new-password' : 'current-password'}"` })}
+        ${setup ? field('password2', 'Passwort wiederholen', '', { type: 'password', required: true, attrs: 'autocomplete="new-password"' }) : ''}
+      </div>
+      <p class="error" id="err"></p>
+      <div class="actions" style="margin-top:4px">
+        <a class="btn ghost small" href="#/einstellungen">Server-Einstellungen</a>
+        <span class="spacer"></span>
+        <button class="btn primary" type="submit">${setup ? 'Anlegen & anmelden' : 'Anmelden'}</button>
+      </div>
+    </form>
+  `, 'kunden', false);
+  const f = document.getElementById('f');
+  f.username.focus();
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = formData(f);
+    const err = document.getElementById('err');
+    err.textContent = '';
+    if (setup && d.password !== d.password2) { err.textContent = 'Die Passwörter stimmen nicht überein.'; return; }
+    f.querySelector('button[type=submit]').disabled = true;
+    try {
+      if (setup) await Sync.setup({ name: d.name, username: d.username, password: d.password }, chooseUpload);
+      else await Sync.login(d.username, d.password, chooseUpload);
+      toast(`Angemeldet als ${Sync.user.name}`);
+      go('#/');
+      router();
+    } catch (ex) {
+      err.textContent = ex.message;
+      f.querySelector('button[type=submit]').disabled = false;
+    }
+  });
+}
+
+// ---------- Benutzerverwaltung (Administratoren) ----------
+async function viewUsers() {
+  if (!Sync.isAdmin) return notFound();
+  render('<h1>Benutzer</h1><p class="muted">Lade …</p>', 'einstellungen');
+  let users;
+  try { users = await Sync.users.list(); } catch (e) { render(`<h1>Benutzer</h1><div class="notice danger">${esc(e.message)}</div>`, 'einstellungen'); return; }
+  render(`
+    <div class="crumbs"><a href="#/einstellungen">Einstellungen</a></div>
+    <h1>Benutzer</h1>
+    <ul class="list">${users.map((u) => `
+      <li><div class="list-item">
+        <div class="grow"><div class="title">${esc(u.name)}</div>
+          <div class="sub">${esc(u.username)}${u.zertNr ? ` · Zert.-Nr. ${esc(u.zertNr)}` : ''}</div>
+          <div class="entry-meta"><span class="badge">${u.role === 'admin' ? 'Administrator' : 'Techniker'}</span>
+            ${u.active ? '<span class="badge ok">aktiv</span>' : '<span class="badge danger">gesperrt</span>'}</div></div>
+        <button class="btn small" data-edit="${u.id}">Bearbeiten</button>
+      </div></li>`).join('')}</ul>
+    <form id="uf" class="card" hidden>
+      <h3 id="ufTitle">Neuer Benutzer</h3>
+      <div class="grid">
+        ${field('name', 'Name (erscheint in Protokollen)', '', { required: true })}
+        ${field('username', 'Benutzername', '', { required: true, attrs: 'autocapitalize="none" autocomplete="off"' })}
+        ${field('zertNr', 'Personal-Zertifikat-Nr. (Kälte)', '')}
+        ${field('role', 'Rolle', 'techniker', { type: 'select', options: [['techniker', 'Techniker'], ['admin', 'Administrator (darf Benutzer verwalten)']] })}
+        ${field('password', 'Passwort', '', { type: 'password', attrs: 'autocomplete="new-password"', hint: 'mind. 8 Zeichen – beim Bearbeiten leer lassen, um es nicht zu ändern' })}
+        <label class="check"><input type="checkbox" name="active" checked> Zugang aktiv</label>
+      </div>
+      <p class="error" id="uerr"></p>
+      <div class="actions">
+        <button type="button" class="btn ghost" id="ucancel">Abbrechen</button>
+        <span class="spacer"></span>
+        <button class="btn primary" type="submit">Speichern</button>
+      </div>
+    </form>
+    <div class="actions" id="uadd"><button class="btn primary" id="newUser">+ Benutzer anlegen</button></div>
+  `, 'einstellungen');
+  const f = document.getElementById('uf');
+  let editId = null;
+  const open = (u) => {
+    editId = u ? u.id : null;
+    document.getElementById('ufTitle').textContent = u ? `Benutzer bearbeiten: ${u.username}` : 'Neuer Benutzer';
+    f.name.value = u ? u.name : '';
+    f.username.value = u ? u.username : '';
+    f.username.disabled = !!u;
+    f.zertNr.value = u ? u.zertNr : '';
+    f.role.value = u ? u.role : 'techniker';
+    f.password.value = '';
+    f.password.required = !u;
+    f.active.checked = u ? u.active : true;
+    document.getElementById('uerr').textContent = '';
+    f.hidden = false;
+    document.getElementById('uadd').hidden = true;
+    f.name.focus();
+  };
+  document.getElementById('newUser').addEventListener('click', () => open(null));
+  document.getElementById('ucancel').addEventListener('click', () => { f.hidden = true; document.getElementById('uadd').hidden = false; });
+  main.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => open(users.find((u) => u.id === b.dataset.edit))));
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = formData(f);
+    try {
+      if (editId) {
+        const body = { name: d.name, zertNr: d.zertNr, role: d.role, active: d.active };
+        if (d.password) body.password = d.password;
+        await Sync.users.update(editId, body);
+      } else {
+        await Sync.users.create({ name: d.name, username: d.username, zertNr: d.zertNr, role: d.role, password: d.password });
+      }
+      toast('Benutzer gespeichert');
+      viewUsers();
+    } catch (ex) {
+      document.getElementById('uerr').textContent = ex.message;
+    }
+  });
+}
+
+/** Abschnitt „Server & Benutzer“ in den Einstellungen. */
+function serverSection() {
+  const u = Sync.user;
+  const st = Sync.status;
+  return `
+    <div class="card" id="serverCard">
+      <h3>Server &amp; Benutzer</h3>
+      ${Sync.loggedIn ? `
+        <dl class="kv">
+          <dt>Server</dt><dd>${esc(Sync.server)}</dd>
+          <dt>Angemeldet als</dt><dd>${esc(u ? u.name : '')} ${u ? `<span class="badge">${u.role === 'admin' ? 'Administrator' : 'Techniker'}</span>` : ''}</dd>
+          <dt>Abgleich</dt><dd>${esc({ ok: 'aktuell', 'läuft': 'läuft …', offline: 'offline – wird nachgeholt', fehler: 'Fehler', aus: 'aus' }[st] || st)}
+            ${Sync.lastSync ? ` · zuletzt ${esc(Sync.lastSync.toLocaleTimeString('de-DE'))}` : ''}
+            ${Sync.pendingCount ? ` · <strong>${Sync.pendingCount} Änderung(en) noch nicht hochgeladen</strong>` : ''}
+            ${Sync.lastError ? `<div class="small error">${esc(Sync.lastError)}</div>` : ''}</dd>
+        </dl>
+        <div class="actions">
+          <button class="btn" id="syncNow">Jetzt abgleichen</button>
+          <button class="btn" id="pwChange">Passwort ändern</button>
+          ${Sync.isAdmin ? '<a class="btn" href="#/benutzer">Benutzer verwalten</a>' : ''}
+          <span class="spacer"></span>
+          <button class="btn danger" id="logout">Abmelden</button>
+        </div>`
+      : `<p class="muted small">${Sync.enabled
+        ? 'Server gefunden – bitte anmelden.'
+        : 'Die Daten werden nur auf diesem Gerät gespeichert. Mit einem eigenen Anlagenbuch-Server werden sie zentral gespeichert und mit allen Geräten und Benutzern abgeglichen.'}</p>
+        ${Sync.enabled ? '<div class="actions"><a class="btn primary" href="#/">Zur Anmeldung</a></div>' : ''}`}
+      <form id="srv" class="grid" style="margin-top:12px">
+        ${field('server', 'Server-Adresse', Sync.configuredServer, {
+          full: true,
+          hint: 'Nur nötig, wenn die App nicht direkt vom eigenen Server geöffnet wird (z. B. Android-App oder GitHub Pages). Leer = automatisch.',
+          attrs: 'placeholder="https://anlagenbuch.meine-firma.de" autocapitalize="none" inputmode="url"',
+        })}
+        <div class="actions full" style="margin-top:0"><span class="spacer"></span><button class="btn" type="submit">Server-Adresse speichern</button></div>
+      </form>
+    </div>`;
+}
+
+function bindServerSection() {
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+  on('syncNow', async () => { await Sync.run(); viewSettings(); });
+  on('logout', async () => {
+    if (Sync.pendingCount && !confirm(`${Sync.pendingCount} Änderung(en) sind noch nicht auf dem Server. Trotzdem abmelden?`)) return;
+    await Sync.logout();
+    toast('Abgemeldet');
+    go('#/');
+    router();
+  });
+  on('pwChange', async () => {
+    const oldPw = prompt('Bisheriges Passwort:');
+    if (!oldPw) return;
+    const newPw = prompt('Neues Passwort (mind. 8 Zeichen):');
+    if (!newPw) return;
+    if (prompt('Neues Passwort wiederholen:') !== newPw) { alert('Die Passwörter stimmen nicht überein.'); return; }
+    try { await Sync.changePassword(oldPw, newPw); toast('Passwort geändert'); } catch (e) { alert(e.message); }
+  });
+  document.getElementById('srv').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await Sync.setServer(e.target.server.value);
+      toast(Sync.enabled ? 'Server verbunden' : 'Nur lokale Speicherung');
+      go('#/');
+      router();
+    } catch (ex) {
+      alert('Server nicht erreichbar: ' + ex.message);
+    }
+  });
+}
+
+/** Statusanzeige in der Kopfzeile. */
+function updateSyncBadge() {
+  const el = document.getElementById('syncState');
+  el.hidden = !Sync.enabled;
+  if (!Sync.enabled) return;
+  const st = Sync.loggedIn ? Sync.status : 'aus';
+  el.className = 'sync-state ' + st;
+  el.querySelector('.label').textContent = Sync.loggedIn && Sync.user ? Sync.user.name : 'abgemeldet';
+  el.title = { ok: 'Mit Server abgeglichen', 'läuft': 'Abgleich läuft', offline: 'Offline – Änderungen werden später hochgeladen', fehler: 'Fehler beim Abgleich: ' + Sync.lastError, aus: 'Nicht angemeldet' }[st] || '';
+}
+
 // ---------- Einstellungen & Datensicherung ----------
 function viewSettings() {
   const st = Store.get();
   const s = st.settings;
   render(`
     <h1>Einstellungen</h1>
+    ${serverSection()}
     <form id="f" class="card">
       <h3>Fachbetrieb (erscheint im PDF)</h3>
       <div class="grid">
@@ -837,7 +1043,7 @@ function viewSettings() {
         ${field('email', 'E-Mail', s.email, { type: 'email' })}
         ${field('zertifikatNr', 'Betriebs-Zertifikat-Nr.', s.zertifikatNr)}
       </div>
-      <h3 style="margin-top:16px">Vorgaben für neue Einträge</h3>
+      <h3 style="margin-top:16px">Vorgaben für neue Einträge${Sync.loggedIn ? ' <span class="muted small">(bei Anmeldung gilt der Name des Benutzers)</span>' : ''}</h3>
       <div class="grid">
         ${field('techniker', 'Techniker (Standard)', s.techniker)}
         ${field('technikerZertNr', 'Personal-Zertifikat-Nr. (Standard)', s.technikerZertNr)}
@@ -846,9 +1052,11 @@ function viewSettings() {
     </form>
     <div class="card">
       <h3>Datensicherung</h3>
-      <p class="muted small">Alle Daten werden nur auf diesem Gerät im Browser gespeichert. Erstelle regelmäßig eine Sicherung
+      <p class="muted small">${Sync.loggedIn
+        ? 'Die Daten werden zentral auf dem Server gespeichert (der Server legt täglich eine Sicherung an). Zusätzlich kannst du hier eine Sicherungsdatei erstellen.'
+        : `Alle Daten werden nur auf diesem Gerät im Browser gespeichert. Erstelle regelmäßig eine Sicherung
         (Aufbewahrungspflicht mindestens 5 Jahre!) und bewahre sie z. B. in der Cloud oder auf dem PC auf.
-        Mit der Sicherungsdatei kannst du die Daten auch auf ein anderes Gerät übertragen.</p>
+        Mit der Sicherungsdatei kannst du die Daten auch auf ein anderes Gerät übertragen.`}</p>
       <p class="small">${st.customers.length} Kunden · ${st.locations.length} Standorte · ${st.systems.length} Anlagen · ${st.entries.length} Einträge</p>
       <div class="actions">
         <button class="btn" id="exp">Sicherung exportieren (.json)</button>
@@ -856,10 +1064,10 @@ function viewSettings() {
       </div>
     </div>
   `, 'einstellungen');
+  bindServerSection();
   document.getElementById('f').addEventListener('submit', async (e) => {
     e.preventDefault();
-    Object.assign(Store.get().settings, formData(e.target));
-    await Store.save();
+    await Store.saveSettings(formData(e.target));
     toast('Einstellungen gespeichert');
   });
   document.getElementById('exp').addEventListener('click', async () => {
@@ -896,6 +1104,8 @@ function router() {
   const p = path.split('/').filter(Boolean);
   if (Signature && !document.getElementById('sigModal').hidden) document.getElementById('sigCancel').click();
   if (q.get('bereich')) Areas.setCurrent(q.get('bereich'));
+  if (Sync.enabled && !Sync.loggedIn && p[0] !== 'einstellungen') return viewLogin();
+  if (p[0] === 'benutzer') return viewUsers();
 
   if (p.length === 0) return viewAreas();
   if (p[0] === 'b') {
@@ -932,6 +1142,17 @@ function router() {
 
 (async function init() {
   await Store.load();
+  await Sync.init();
+  Sync.onStatus(() => {
+    updateSyncBadge();
+    if (location.hash.startsWith('#/einstellungen') && document.getElementById('serverCard') && !document.activeElement.closest('form')) viewSettings();
+  });
+  // Neue Daten vom Server: aktuelle Ansicht neu zeichnen (nicht während einer Eingabe)
+  Sync.onData(() => {
+    const editing = /\/(neu|bearbeiten)|einstellungen|benutzer/.test(location.hash) || !document.getElementById('sigModal').hidden;
+    if (!editing) router();
+  });
+  updateSyncBadge();
   window.addEventListener('hashchange', router);
   router();
   if ('serviceWorker' in navigator && location.protocol !== 'file:' && !FileOut.isNative()) {

@@ -22,7 +22,7 @@ const Store = (() => {
   let state = emptyState();
 
   function emptyState() {
-    return { version: 2, settings: { ...DEFAULT_SETTINGS }, customers: [], locations: [], systems: [], entries: [] };
+    return { version: 2, settings: { ...DEFAULT_SETTINGS }, customers: [], locations: [], systems: [], entries: [], nummernJeBereich: true, pending: {}, syncSeq: 0 };
   }
 
   function openDb() {
@@ -55,6 +55,8 @@ const Store = (() => {
       systems: Array.isArray(s.systems) ? s.systems : [],
       entries: Array.isArray(s.entries) ? s.entries : [],
       nummernJeBereich: !!s.nummernJeBereich,
+      pending: s.pending && typeof s.pending === 'object' ? s.pending : {},
+      syncSeq: Number(s.syncSeq) || 0,
     });
   }
 
@@ -96,12 +98,97 @@ const Store = (() => {
     return state;
   }
 
-  async function save() {
+  const listeners = [];
+  const onChange = (fn) => listeners.push(fn);
+
+  async function save({ silent = false } = {}) {
     if (db) {
       await idb('readwrite', (os) => os.put(state, KEY));
     } else {
       localStorage.setItem(LS_KEY, JSON.stringify(state));
     }
+    if (!silent) listeners.forEach((fn) => fn());
+  }
+
+  // --- Änderungsverfolgung für den Server-Abgleich ---
+  const COLLS = ['customers', 'locations', 'systems', 'entries'];
+  const SETTINGS_ID = 'firma';
+
+  function markDirty(coll, id) {
+    state.pending[`${coll}:${id}`] = Date.now();
+  }
+
+  function markAllDirty() {
+    for (const coll of COLLS) for (const r of state[coll]) markDirty(coll, r.id);
+    markDirty('settings', SETTINGS_ID);
+  }
+
+  /** Datensatz geändert (z. B. Unterschrift entfernt): Zeitstempel setzen und zum Abgleich vormerken. */
+  function touch(coll, id) {
+    const r = state[coll].find((x) => x.id === id);
+    if (r) r.updatedAt = new Date().toISOString();
+    markDirty(coll, id);
+    return save();
+  }
+
+  function saveSettings(values) {
+    Object.assign(state.settings, values, { updatedAt: new Date().toISOString() });
+    markDirty('settings', SETTINGS_ID);
+    return save();
+  }
+
+  /** Ausstehende Änderungen für den Upload. */
+  function pendingChanges() {
+    const now = new Date().toISOString();
+    return Object.entries(state.pending).map(([key, mark]) => {
+      const [coll, id] = key.split(/:(.*)/s);
+      if (coll === 'settings') return { key, mark, coll, rec: { ...state.settings, id: SETTINGS_ID } };
+      const rec = (state[coll] || []).find((x) => x.id === id);
+      return { key, mark, coll, rec: rec || { id, deleted: true, updatedAt: now } };
+    });
+  }
+
+  /** Nach erfolgreichem Upload: nur Einträge entfernen, die seitdem nicht erneut geändert wurden. */
+  function clearPending(sent) {
+    for (const { key, mark } of sent) if (state.pending[key] === mark) delete state.pending[key];
+    return save({ silent: true });
+  }
+
+  /** Änderungen vom Server übernehmen (lokal neuere, noch nicht hochgeladene Stände bleiben). */
+  function applyRemote(changes, seq) {
+    let changed = false;
+    for (const { coll, rec } of changes) {
+      const { _rev, ...data } = rec;
+      if (coll === 'settings') {
+        if (state.pending[`settings:${SETTINGS_ID}`] && String(state.settings.updatedAt || '') > String(data.updatedAt || '')) continue;
+        delete data.id;
+        state.settings = { ...state.settings, ...data };
+        changed = true;
+        continue;
+      }
+      if (!COLLS.includes(coll)) continue;
+      const list = state[coll];
+      const i = list.findIndex((x) => x.id === data.id);
+      if (state.pending[`${coll}:${data.id}`] && i >= 0 && String(list[i].updatedAt || '') > String(data.updatedAt || '')) continue;
+      if (data.deleted) {
+        if (i >= 0) { list.splice(i, 1); changed = true; }
+      } else if (i >= 0) {
+        list[i] = data;
+        changed = true;
+      } else {
+        list.push(data);
+        changed = true;
+      }
+    }
+    state.syncSeq = seq;
+    return save({ silent: true }).then(() => changed);
+  }
+
+  /** Lokale Daten verwerfen (beim Umstieg auf die Serverdaten). */
+  function resetForServer() {
+    const settings = state.settings;
+    state = { ...emptyState(), settings };
+    return save({ silent: true });
   }
 
   function uid() {
@@ -110,7 +197,15 @@ const Store = (() => {
   }
 
   const get = () => state;
-  const replace = (s) => { state = normalize(s); return save(); };
+  /** Sicherung einspielen: ersetzt alle Daten und merkt sie zum Hochladen vor. */
+  function replace(s) {
+    const syncSeq = state.syncSeq;
+    state = normalize(s);
+    state.syncSeq = syncSeq;
+    state.pending = {};
+    markAllDirty();
+    return save();
+  }
 
   // --- Kunden ---
   const customer = (id) => state.customers.find((c) => c.id === id);
@@ -162,6 +257,8 @@ const Store = (() => {
     const z = c.anlagenZaehler && typeof c.anlagenZaehler === 'object' && c.anlagenZaehler.prefix === prefix ? c.anlagenZaehler : { prefix };
     c.anlagenZaehler = { ...z, [area]: n };
     delete c.anlagenZaehlerPrefix;
+    c.updatedAt = new Date().toISOString();
+    markDirty('customers', c.id);
   }
 
   /** Einmalige Umstellung: bisherige Nummern <Kd-Nr>-0001 (bereichsübergreifend) je Bereich neu durchnummerieren. */
@@ -197,36 +294,43 @@ const Store = (() => {
       const i = state[list].findIndex((x) => x.id === obj.id);
       if (i < 0) state[list].push(obj); else state[list][i] = { ...state[list][i], ...obj };
     }
+    markDirty(list, obj.id);
     return save().then(() => state[list].find((x) => x.id === obj.id));
+  }
+
+  /** Datensätze entfernen und die Löschung zum Abgleich vormerken. */
+  function drop(coll, pred) {
+    for (const r of state[coll]) if (pred(r)) markDirty(coll, r.id);
+    state[coll] = state[coll].filter((r) => !pred(r));
   }
 
   function removeCustomer(id) {
     const sysIds = new Set(systemsOf(id).map((s) => s.id));
-    state.entries = state.entries.filter((e) => !sysIds.has(e.systemId));
-    state.systems = state.systems.filter((s) => s.customerId !== id);
-    state.locations = state.locations.filter((l) => l.customerId !== id);
-    state.customers = state.customers.filter((c) => c.id !== id);
+    drop('entries', (e) => sysIds.has(e.systemId));
+    drop('systems', (s) => s.customerId === id);
+    drop('locations', (l) => l.customerId === id);
+    drop('customers', (c) => c.id === id);
     return save();
   }
   function removeLocation(id) {
     const sysIds = new Set(systemsAt(id).map((s) => s.id));
-    state.entries = state.entries.filter((e) => !sysIds.has(e.systemId));
-    state.systems = state.systems.filter((s) => s.locationId !== id);
-    state.locations = state.locations.filter((l) => l.id !== id);
+    drop('entries', (e) => sysIds.has(e.systemId));
+    drop('systems', (s) => s.locationId === id);
+    drop('locations', (l) => l.id === id);
     return save();
   }
   function removeSystem(id) {
-    state.entries = state.entries.filter((e) => e.systemId !== id);
-    state.systems = state.systems.filter((s) => s.id !== id);
+    drop('entries', (e) => e.systemId === id);
+    drop('systems', (s) => s.id === id);
     return save();
   }
   function removeEntry(id) {
-    state.entries = state.entries.filter((e) => e.id !== id);
+    drop('entries', (e) => e.id === id);
     return save();
   }
 
   return {
-    load, save, get, replace, uid, customer, location, locationsOf, system, entry, systemsOf, systemsAt, entriesOf,
+    load, save, get, replace, uid, onChange, touch, saveSettings, markAllDirty, pendingChanges, clearPending, applyRemote, resetForServer, customer, location, locationsOf, system, entry, systemsOf, systemsAt, entriesOf,
     upsert, nextSystemNumber, noteSystemNumber, removeCustomer, removeLocation, removeSystem, removeEntry, DEFAULT_SETTINGS,
   };
 })();

@@ -1,0 +1,33 @@
+# Start:  docker compose up -d --build
+# Mit HTTPS über eigene Domain (Caddy holt das Zertifikat automatisch):
+#         DOMAIN=anlagenbuch.meine-firma.de docker compose --profile https up -d --build
+services:
+  anlagenbuch:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - anlagenbuch-daten:/data
+    environment:
+      # Erlaubt der Android-App und der GitHub-Pages-Version den Zugriff auf diesen Server
+      - ALLOWED_ORIGINS=https://localhost,https://moritzherrmann-ctrl.github.io
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      - ./server/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-daten:/data
+    depends_on:
+      - anlagenbuch
+
+volumes:
+  anlagenbuch-daten:
+  caddy-daten:
