@@ -5,8 +5,8 @@ nach Art. 7 der F-Gase-Verordnung (EU) 2024/573 – für **Moritz Herrmann Heizu
 
 ## Funktionen
 
-- **Startseite: nächste fällige Wartungen** – alle anstehenden Wartungen und Dichtheitskontrollen
-  aller Anlagen, nach Datum sortiert, überfällige rot markiert
+- **Startseite: nächste Dichtheitskontrollen** – alle anstehenden Dichtheitskontrollen und
+  Nachkontrollen der prüfpflichtigen Anlagen, nach Datum sortiert, überfällige rot markiert
 - **Kunden** (Betreiber) anlegen, bearbeiten, suchen
 - **Standorte** je Kunde (z. B. Filialen, Lager) mit eigener Anschrift und Ansprechpartner
 - **Anlagen** je Standort anlegen – alle Stammdaten der Vorlage:

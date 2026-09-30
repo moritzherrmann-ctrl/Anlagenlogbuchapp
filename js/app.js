@@ -107,7 +107,8 @@ function viewHome(q) {
       ...Store.locationsOf(c.id).map((l) => [l.name, l.ort, l.strasse].join(' '))].join(' ').toLowerCase().includes(term))
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'));
 
-  const due = st.systems.flatMap((s) => FGas.dueItems(s, Store.entriesOf(s.id)).map((d) => ({ s, d })));
+  // nur prüfpflichtige Anlagen (Dichtheitskontrolle bzw. Nachkontrolle nach Leckage)
+  const due = st.systems.map((s) => ({ s, d: FGas.nextDue(s, Store.entriesOf(s.id)) })).filter((x) => x.d);
   const dated = due.filter((x) => x.d.date).sort((a, b) => a.d.date.localeCompare(b.d.date));
   const open = due.filter((x) => !x.d.date);
   const shown = showAll ? dated : dated.slice(0, HOME_LIMIT);
@@ -128,15 +129,15 @@ function viewHome(q) {
 
   render(`
     <div class="head-row">
-      <h1>Nächste fällige Wartungen</h1>
+      <h1>Nächste Dichtheitskontrollen</h1>
     </div>
     ${overdue ? `<div class="notice danger"><strong>${overdue} ${overdue === 1 ? 'Termin ist' : 'Termine sind'} überfällig.</strong></div>` : ''}
     ${dated.length ? `<ul class="list">${shown.map(dueRow).join('')}</ul>
       ${dated.length > HOME_LIMIT ? `<div class="actions" style="margin-top:0">
         <a class="btn small" href="#/?${showAll ? '' : 'alle=1'}">${showAll ? 'Weniger anzeigen' : `Alle ${dated.length} Termine anzeigen`}</a></div>` : ''}`
-    : `<div class="empty">Keine anstehenden Termine. Termine entstehen automatisch aus Wartungsintervall, Prüfpflicht und Einträgen der Anlagen.</div>`}
+    : `<div class="empty">Keine anstehenden Dichtheitskontrollen. Termine entstehen automatisch für prüfpflichtige Anlagen (ab 5 t CO2-Äquivalent) aus dem Prüfintervall und den Einträgen.</div>`}
     ${open.length ? `<details class="card" style="margin-top:12px"><summary><strong>${open.length} Anlage(n) ohne Termin</strong>
-      <span class="muted small"> – noch keine Wartung/Prüfung und kein Errichtungsdatum erfasst</span></summary>
+      <span class="muted small"> – noch keine Dichtheitskontrolle und kein Errichtungsdatum erfasst</span></summary>
       <ul class="list" style="margin-top:10px">${open.map(dueRow).join('')}</ul></details>` : ''}
 
     <div class="head-row" style="margin-top:24px">
