@@ -56,61 +56,113 @@ function render(html, nav = 'kunden') {
 }
 
 function notFound() {
-  render(`<div class="empty">Nicht gefunden. <a href="#/">Zur Kundenliste</a></div>`);
+  render(`<div class="empty">Nicht gefunden. <a href="#/">Zur Startseite</a></div>`);
 }
 
 function systemTitle(s) {
   return [s.anlagenNr, s.bezeichnung].filter(Boolean).join(' – ') || 'Anlage ohne Bezeichnung';
 }
 
+function locationTitle(l) {
+  return (l && (l.name || customerAddress(l))) || 'Standort ohne Namen';
+}
+
+/** Brotkrumen: Kunden › Kunde › Standort › Anlage (je nach Tiefe). */
+function crumbs({ c, l, s } = {}) {
+  const parts = ['<a href="#/">Start</a>'];
+  if (c) parts.push(`<a href="#/kunde/${c.id}">${esc(c.name)}</a>`);
+  if (l) parts.push(`<a href="#/standort/${l.id}">${esc(locationTitle(l))}</a>`);
+  if (s) parts.push(`<a href="#/anlage/${s.id}">${esc(systemTitle(s))}</a>`);
+  return `<div class="crumbs">${parts.join(' › ')}</div>`;
+}
+
+const dueLabel = (d) => (d.kind === 'wartung' ? 'Wartung' : d.reason);
+
+/** Badge mit dem frühesten anstehenden Termin einer Anlage. */
 function dueBadge(sys) {
-  const st = FGas.dueStatus(FGas.nextDue(sys, Store.entriesOf(sys.id)));
+  const [first] = FGas.dueItems(sys, Store.entriesOf(sys.id));
+  if (!first) return '<span class="badge">keine Termine</span>';
+  const st = FGas.dueStatus(first);
+  return `<span class="badge ${st.cls}">${esc(dueLabel(first))}: ${esc(st.text)}</span>`;
+}
+
+/** Frühester Termin über mehrere Anlagen (für Kunden- und Standortlisten). */
+function worstBadge(systems) {
+  const items = systems.flatMap((s) => FGas.dueItems(s, Store.entriesOf(s.id)).filter((d) => d.date));
+  if (!items.length) return '';
+  items.sort((a, b) => a.date.localeCompare(b.date));
+  const st = FGas.dueStatus(items[0]);
   return `<span class="badge ${st.cls}">${esc(st.text)}</span>`;
 }
 
-// ---------- Kundenliste (Start) ----------
-function viewCustomers(q) {
+// ---------- Startseite: nächste fällige Wartungen + Kunden ----------
+const HOME_LIMIT = 10;
+
+function viewHome(q) {
   const st = Store.get();
   const term = (q.get('q') || '').toLowerCase();
+  const showAll = q.get('alle') === '1';
   const customers = [...st.customers]
-    .filter((c) => !term || [c.name, c.ansprechpartner, c.ort, c.strasse, c.kundennr].join(' ').toLowerCase().includes(term))
+    .filter((c) => !term || [c.name, c.ansprechpartner, c.ort, c.strasse, c.kundennr,
+      ...Store.locationsOf(c.id).map((l) => [l.name, l.ort, l.strasse].join(' '))].join(' ').toLowerCase().includes(term))
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'));
 
-  // Fällige Prüfungen
-  const dueList = st.systems.map((s) => ({ s, due: FGas.nextDue(s, Store.entriesOf(s.id)) }))
-    .filter(({ due }) => due && (!due.date || due.date <= FGas.addMonths(today(), 1)))
-    .sort((a, b) => (a.due.date || '').localeCompare(b.due.date || ''));
+  const due = st.systems.flatMap((s) => FGas.dueItems(s, Store.entriesOf(s.id)).map((d) => ({ s, d })));
+  const dated = due.filter((x) => x.d.date).sort((a, b) => a.d.date.localeCompare(b.d.date));
+  const open = due.filter((x) => !x.d.date);
+  const shown = showAll ? dated : dated.slice(0, HOME_LIMIT);
+  const overdue = dated.filter((x) => x.d.date < today()).length;
+
+  const dueRow = ({ s, d }) => {
+    const c = Store.customer(s.customerId);
+    const l = Store.location(s.locationId);
+    const stt = FGas.dueStatus(d);
+    const day = d.date ? d.date.slice(8, 10) + '.' + d.date.slice(5, 7) + '.' : '–';
+    return `<li><a class="list-item" href="#/anlage/${s.id}">
+      <div class="date-chip ${stt.cls}"><strong>${day}</strong><span>${d.date ? d.date.slice(0, 4) : 'offen'}</span></div>
+      <div class="grow"><div class="title">${esc(dueLabel(d))} · ${esc(systemTitle(s))}</div>
+      <div class="sub">${esc([c && c.name, l && locationTitle(l)].filter(Boolean).join(' · '))}</div>
+      <div class="entry-meta"><span class="badge ${stt.cls}">${esc(stt.text)}</span></div></div>
+      <span class="chev">›</span></a></li>`;
+  };
 
   render(`
     <div class="head-row">
+      <h1>Nächste fällige Wartungen</h1>
+    </div>
+    ${overdue ? `<div class="notice danger"><strong>${overdue} ${overdue === 1 ? 'Termin ist' : 'Termine sind'} überfällig.</strong></div>` : ''}
+    ${dated.length ? `<ul class="list">${shown.map(dueRow).join('')}</ul>
+      ${dated.length > HOME_LIMIT ? `<div class="actions" style="margin-top:0">
+        <a class="btn small" href="#/?${showAll ? '' : 'alle=1'}">${showAll ? 'Weniger anzeigen' : `Alle ${dated.length} Termine anzeigen`}</a></div>` : ''}`
+    : `<div class="empty">Keine anstehenden Termine. Termine entstehen automatisch aus Wartungsintervall, Prüfpflicht und Einträgen der Anlagen.</div>`}
+    ${open.length ? `<details class="card" style="margin-top:12px"><summary><strong>${open.length} Anlage(n) ohne Termin</strong>
+      <span class="muted small"> – noch keine Wartung/Prüfung und kein Errichtungsdatum erfasst</span></summary>
+      <ul class="list" style="margin-top:10px">${open.map(dueRow).join('')}</ul></details>` : ''}
+
+    <div class="head-row" style="margin-top:24px">
       <h1>Kunden</h1>
       <a class="btn primary" href="#/kunde/neu">+ Kunde anlegen</a>
     </div>
-    ${dueList.length ? `
-      <div class="card">
-        <h3>Anstehende / überfällige Prüfungen</h3>
-        <ul class="list">${dueList.map(({ s }) => {
-          const c = Store.customer(s.customerId);
-          return `<li><a class="list-item" href="#/anlage/${s.id}">
-            <div class="grow"><div class="title">${esc(systemTitle(s))}</div><div class="sub">${esc(c ? c.name : '')}</div></div>
-            ${dueBadge(s)}</a></li>`;
-        }).join('')}</ul>
-      </div>` : ''}
-    <input class="search" type="search" id="search" placeholder="Kunden suchen …" value="${esc(q.get('q') || '')}">
+    <input class="search" type="search" id="search" placeholder="Kunden oder Standorte suchen …" value="${esc(q.get('q') || '')}">
     ${customers.length ? `<ul class="list">${customers.map((c) => {
-      const n = Store.systemsOf(c.id).length;
+      const nl = Store.locationsOf(c.id).length;
+      const ns = Store.systemsOf(c.id).length;
       return `<li><a class="list-item" href="#/kunde/${c.id}">
         <div class="grow"><div class="title">${esc(c.name)}</div>
-        <div class="sub">${esc(customerAddress(c))}</div></div>
-        <span class="badge">${n} ${n === 1 ? 'Anlage' : 'Anlagen'}</span><span class="chev">›</span></a></li>`;
+        <div class="sub">${esc(customerAddress(c))}</div>
+        <div class="entry-meta"><span class="badge">${nl} ${nl === 1 ? 'Standort' : 'Standorte'}</span>
+          <span class="badge">${ns} ${ns === 1 ? 'Anlage' : 'Anlagen'}</span></div></div>
+        <span class="chev">›</span></a></li>`;
     }).join('')}</ul>`
     : `<div class="empty">${term ? 'Keine Treffer.' : 'Noch keine Kunden angelegt.<br><br><a class="btn primary" href="#/kunde/neu">+ Ersten Kunden anlegen</a>'}</div>`}
   `);
   const s = document.getElementById('search');
   s.addEventListener('input', () => {
-    history.replaceState(null, '', '#/?q=' + encodeURIComponent(s.value));
+    const qs = new URLSearchParams({ q: s.value });
+    if (showAll) qs.set('alle', '1');
+    history.replaceState(null, '', '#/?' + qs);
     const pos = s.selectionStart;
-    viewCustomers(new URLSearchParams('q=' + encodeURIComponent(s.value)));
+    viewHome(qs);
     const n = document.getElementById('search');
     n.focus();
     n.setSelectionRange(pos, pos);
@@ -122,7 +174,7 @@ function viewCustomerForm(id) {
   const c = id ? Store.customer(id) : {};
   if (id && !c) return notFound();
   render(`
-    <div class="crumbs"><a href="#/">Kunden</a>${id ? ` › <a href="#/kunde/${c.id}">${esc(c.name)}</a>` : ''}</div>
+    ${crumbs({ c: id ? c : null })}
     <h1>${id ? 'Kunde bearbeiten' : 'Neuer Kunde'}</h1>
     <form id="f" class="card">
       <div class="grid">
@@ -135,6 +187,7 @@ function viewCustomerForm(id) {
         ${field('telefon', 'Telefon', c.telefon, { type: 'tel' })}
         ${field('email', 'E-Mail', c.email, { type: 'email' })}
         ${field('notizen', 'Notizen', c.notizen, { type: 'textarea', full: true })}
+        ${id ? '' : '<label class="check full"><input type="checkbox" id="firstLoc" checked> Kundenanschrift gleich als ersten Standort anlegen</label>'}
       </div>
       <div class="actions">
         ${id ? '<button type="button" class="btn danger" id="del">Kunde löschen</button>' : ''}
@@ -146,27 +199,36 @@ function viewCustomerForm(id) {
   `);
   document.getElementById('f').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const saved = await Store.upsert('customers', { ...formData(e.target), id: id || undefined });
+    const d = formData(e.target);
+    const saved = await Store.upsert('customers', { ...d, id: id || undefined });
+    const firstLoc = document.getElementById('firstLoc');
+    if (firstLoc && firstLoc.checked) {
+      await Store.upsert('locations', {
+        customerId: saved.id, name: 'Hauptstandort', strasse: d.strasse, plz: d.plz, ort: d.ort,
+        ansprechpartner: d.ansprechpartner, telefon: d.telefon,
+      });
+    }
     toast('Kunde gespeichert');
-    go(id ? '#/kunde/' + id : '#/kunde/' + saved.id);
+    go('#/kunde/' + saved.id);
   });
   const del = document.getElementById('del');
   if (del) del.addEventListener('click', async () => {
+    const nl = Store.locationsOf(id).length;
     const n = Store.systemsOf(id).length;
-    if (!confirm(`Kunde „${c.name}“ wirklich löschen?${n ? `\nAuch ${n} Anlage(n) inkl. aller Einträge werden gelöscht!` : ''}`)) return;
+    if (!confirm(`Kunde „${c.name}“ wirklich löschen?${nl || n ? `\nAuch ${nl} Standort(e) und ${n} Anlage(n) inkl. aller Einträge werden gelöscht!` : ''}`)) return;
     await Store.removeCustomer(id);
     toast('Kunde gelöscht');
     go('#/');
   });
 }
 
-// ---------- Kundendetail mit Anlagen ----------
+// ---------- Kundendetail mit Standorten ----------
 function viewCustomer(id) {
   const c = Store.customer(id);
   if (!c) return notFound();
-  const systems = Store.systemsOf(id).sort((a, b) => systemTitle(a).localeCompare(systemTitle(b), 'de'));
+  const locations = Store.locationsOf(id);
   render(`
-    <div class="crumbs"><a href="#/">Kunden</a></div>
+    ${crumbs()}
     <div class="head-row">
       <h1>${esc(c.name)}</h1>
       <a class="btn" href="#/kunde/${id}/bearbeiten">Bearbeiten</a>
@@ -182,15 +244,105 @@ function viewCustomer(id) {
       </dl>
     </div>
     <div class="head-row">
+      <h2 style="margin:8px 0 0;flex:1">Standorte</h2>
+      <a class="btn primary" href="#/standort/neu?kunde=${id}">+ Standort anlegen</a>
+    </div>
+    ${locations.length ? `<ul class="list">${locations.map((l) => {
+      const systems = Store.systemsAt(l.id);
+      return `<li><a class="list-item" href="#/standort/${l.id}">
+        <div class="grow"><div class="title">${esc(locationTitle(l))}</div>
+        <div class="sub">${esc(l.name ? customerAddress(l) : '')}</div>
+        <div class="entry-meta"><span class="badge">${systems.length} ${systems.length === 1 ? 'Anlage' : 'Anlagen'}</span>${worstBadge(systems)}</div></div>
+        <span class="chev">›</span></a></li>`;
+    }).join('')}</ul>`
+    : `<div class="empty">Für diesen Kunden ist noch kein Standort angelegt.<br>Lege zuerst einen Standort an – dort kannst du dann die Anlagen anlegen.</div>`}
+  `);
+}
+
+// ---------- Standort anlegen / bearbeiten ----------
+function viewLocationForm(id, q) {
+  const l = id ? Store.location(id) : null;
+  if (id && !l) return notFound();
+  const c = Store.customer(l ? l.customerId : q.get('kunde'));
+  if (!c) return notFound();
+  const hasLocations = Store.locationsOf(c.id).length > 0;
+  const v = l || (hasLocations ? {} : { name: 'Hauptstandort', strasse: c.strasse, plz: c.plz, ort: c.ort });
+  render(`
+    ${crumbs({ c, l })}
+    <h1>${l ? 'Standort bearbeiten' : 'Neuer Standort'}</h1>
+    <form id="f" class="card">
+      <div class="grid">
+        ${field('name', 'Bezeichnung', v.name, { required: true, full: true, hint: 'z. B. „Filiale Innenstadt“, „Lager Nord“, „Hauptsitz“' })}
+        ${field('strasse', 'Straße, Hausnr.', v.strasse, { full: true })}
+        ${field('plz', 'PLZ', v.plz, { attrs: 'inputmode="numeric"' })}
+        ${field('ort', 'Ort', v.ort)}
+        ${field('ansprechpartner', 'Ansprechpartner vor Ort', v.ansprechpartner)}
+        ${field('telefon', 'Telefon vor Ort', v.telefon, { type: 'tel' })}
+        ${field('notizen', 'Notizen (Zugang, Schlüssel, …)', v.notizen, { type: 'textarea', full: true })}
+      </div>
+      <div class="actions">
+        ${l ? '<button type="button" class="btn danger" id="del">Standort löschen</button>' : `<button type="button" class="btn ghost" id="copyAddr">Kundenanschrift übernehmen</button>`}
+        <span class="spacer"></span>
+        <a class="btn ghost" href="${l ? '#/standort/' + l.id : '#/kunde/' + c.id}">Abbrechen</a>
+        <button class="btn primary" type="submit">Speichern</button>
+      </div>
+    </form>
+  `);
+  const f = document.getElementById('f');
+  const copy = document.getElementById('copyAddr');
+  if (copy) copy.addEventListener('click', () => {
+    f.strasse.value = c.strasse || '';
+    f.plz.value = c.plz || '';
+    f.ort.value = c.ort || '';
+  });
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const saved = await Store.upsert('locations', { ...formData(f), id: id || undefined, customerId: c.id });
+    toast('Standort gespeichert');
+    go('#/standort/' + saved.id);
+  });
+  const del = document.getElementById('del');
+  if (del) del.addEventListener('click', async () => {
+    const n = Store.systemsAt(id).length;
+    if (!confirm(`Standort „${locationTitle(l)}“ wirklich löschen?${n ? `\nAuch ${n} Anlage(n) inkl. aller Einträge werden gelöscht!` : ''}`)) return;
+    await Store.removeLocation(id);
+    toast('Standort gelöscht');
+    go('#/kunde/' + c.id);
+  });
+}
+
+// ---------- Standortdetail mit Anlagen ----------
+function viewLocation(id) {
+  const l = Store.location(id);
+  if (!l) return notFound();
+  const c = Store.customer(l.customerId);
+  const systems = Store.systemsAt(id).sort((a, b) => systemTitle(a).localeCompare(systemTitle(b), 'de'));
+  render(`
+    ${crumbs({ c })}
+    <div class="head-row">
+      <h1>${esc(locationTitle(l))}</h1>
+      <a class="btn" href="#/standort/${id}/bearbeiten">Bearbeiten</a>
+    </div>
+    <div class="card">
+      <dl class="kv">
+        <dt>Kunde</dt><dd>${esc(c.name)}</dd>
+        <dt>Anschrift</dt><dd>${esc(customerAddress(l)) || '–'}</dd>
+        ${l.ansprechpartner ? `<dt>Ansprechpartner</dt><dd>${esc(l.ansprechpartner)}</dd>` : ''}
+        ${l.telefon ? `<dt>Telefon</dt><dd><a href="tel:${esc(l.telefon)}">${esc(l.telefon)}</a></dd>` : ''}
+        ${l.notizen ? `<dt>Notizen</dt><dd>${esc(l.notizen)}</dd>` : ''}
+      </dl>
+    </div>
+    <div class="head-row">
       <h2 style="margin:8px 0 0;flex:1">Anlagen</h2>
-      <a class="btn primary" href="#/anlage/neu?kunde=${id}">+ Anlage anlegen</a>
+      <a class="btn primary" href="#/anlage/neu?standort=${id}">+ Anlage anlegen</a>
     </div>
     ${systems.length ? `<ul class="list">${systems.map((s) => `
       <li><a class="list-item" href="#/anlage/${s.id}">
         <div class="grow"><div class="title">${esc(systemTitle(s))}</div>
-        <div class="sub">${esc([s.typ, s.kaeltemittel, s.fuellmenge ? fmtNum(s.fuellmenge, 3) + ' kg' : '', s.standort].filter(Boolean).join(' · '))}</div></div>
-        ${dueBadge(s)}<span class="chev">›</span></a></li>`).join('')}</ul>`
-    : `<div class="empty">Für diesen Kunden ist noch keine Anlage angelegt.</div>`}
+        <div class="sub">${esc([s.typ, s.kaeltemittel, s.fuellmenge ? fmtNum(s.fuellmenge, 3) + ' kg' : '', s.aufstellort].filter(Boolean).join(' · '))}</div>
+        <div class="entry-meta">${dueBadge(s)}</div></div>
+        <span class="chev">›</span></a></li>`).join('')}</ul>`
+    : `<div class="empty">An diesem Standort ist noch keine Anlage angelegt.</div>`}
   `);
 }
 
@@ -199,18 +351,21 @@ function viewSystemForm(id, q) {
   const settings = Store.get().settings;
   const s = id ? Store.system(id) : null;
   if (id && !s) return notFound();
-  const customerId = s ? s.customerId : q.get('kunde');
-  const c = Store.customer(customerId);
+  const l = Store.location(s ? s.locationId : q.get('standort'));
+  if (!l) return notFound();
+  const c = Store.customer(l.customerId);
   if (!c) return notFound();
+  const locOptions = Store.locationsOf(c.id).map((x) => [x.id, locationTitle(x) + (x.name && customerAddress(x) ? ' – ' + customerAddress(x) : '')]);
   const v = s || {
-    standort: customerAddress(c),
+    locationId: l.id,
     kaeltemittel: '',
+    wartungsintervall: '12',
     leckageSystem: 'nein',
     pruefintervall: 'auto',
     errichtetDurch: `${settings.firma}, ${settings.strasse}, ${settings.plzOrt} · Zertifikat-Nr. ${settings.zertifikatNr}`,
   };
   render(`
-    <div class="crumbs"><a href="#/">Kunden</a> › <a href="#/kunde/${c.id}">${esc(c.name)}</a>${s ? ` › <a href="#/anlage/${s.id}">${esc(systemTitle(s))}</a>` : ''}</div>
+    ${crumbs({ c, l, s })}
     <h1>${s ? 'Anlage bearbeiten' : 'Neue Anlage'}</h1>
     <form id="f">
       <fieldset class="card">
@@ -218,7 +373,8 @@ function viewSystemForm(id, q) {
         <div class="grid">
           ${field('anlagenNr', 'Anlagen-Nr.', v.anlagenNr)}
           ${field('bezeichnung', 'Bezeichnung', v.bezeichnung, { required: true, hint: 'z. B. „Klima Büro EG“' })}
-          ${field('standort', 'Anlagen-Standort', v.standort, { full: true })}
+          ${field('locationId', 'Standort', v.locationId || l.id, { type: 'select', options: locOptions, required: true })}
+          ${field('aufstellort', 'Aufstellort (optional)', v.aufstellort, { hint: 'z. B. „Dach“, „Serverraum 2. OG“' })}
           ${field('typ', 'Anlagentyp', v.typ, { list: 'typen', hint: 'z. B. Split, Multisplit, VRF, Kaltwassersatz, Kühlzelle' })}
           ${field('hersteller', 'Hersteller', v.hersteller)}
           ${field('modell', 'Modell / Typ', v.modell)}
@@ -247,6 +403,16 @@ function viewSystemForm(id, q) {
         </div>
       </fieldset>
       <fieldset class="card">
+        <legend>Wartung</legend>
+        <div class="grid">
+          ${field('wartungsintervall', 'Wartungsintervall', v.wartungsintervall === undefined ? '12' : v.wartungsintervall, {
+            type: 'select',
+            options: [['3', 'alle 3 Monate'], ['6', 'alle 6 Monate'], ['12', 'alle 12 Monate'], ['24', 'alle 24 Monate'], ['0', 'keine regelmäßige Wartung']],
+            hint: 'Nächste Wartung = letzte Wartung (bzw. Errichtung) + Intervall. Erscheint auf der Startseite.',
+          })}
+        </div>
+      </fieldset>
+      <fieldset class="card">
         <legend>Errichtung</legend>
         <div class="grid">
           ${field('errichtetAm', 'Errichtet am', v.errichtetAm, { type: 'date' })}
@@ -256,7 +422,7 @@ function viewSystemForm(id, q) {
       <div class="actions">
         ${s ? '<button type="button" class="btn danger" id="del">Anlage löschen</button>' : ''}
         <span class="spacer"></span>
-        <a class="btn ghost" href="${s ? '#/anlage/' + s.id : '#/kunde/' + c.id}">Abbrechen</a>
+        <a class="btn ghost" href="${s ? '#/anlage/' + s.id : '#/standort/' + l.id}">Abbrechen</a>
         <button class="btn primary" type="submit">Speichern</button>
       </div>
       <datalist id="kaeltemittel">${Object.keys(FGas.REFRIGERANTS).map((k) => `<option value="${esc(k)}">`).join('')}</datalist>
@@ -292,7 +458,7 @@ function viewSystemForm(id, q) {
     if (!confirm(`Anlage „${systemTitle(s)}“ wirklich löschen?${n ? `\nAuch ${n} Eintrag/Einträge werden gelöscht!` : ''}`)) return;
     await Store.removeSystem(id);
     toast('Anlage gelöscht');
-    go('#/kunde/' + c.id);
+    go('#/standort/' + l.id);
   });
 }
 
@@ -301,23 +467,27 @@ function viewSystem(id) {
   const s = Store.system(id);
   if (!s) return notFound();
   const c = Store.customer(s.customerId);
+  const l = Store.location(s.locationId);
   const entries = Store.entriesOf(id);
   const t = FGas.co2e(s);
   const due = FGas.nextDue(s, entries);
   const dueSt = FGas.dueStatus(due);
+  const maint = FGas.nextMaintenance(s, entries);
+  const maintSt = FGas.dueStatus(maint);
+  const alerts = [[due, dueSt], [maint, maintSt]].filter(([d, st]) => d && (st.cls === 'danger' || st.cls === 'warn'));
   const sumAdd = entries.reduce((a, e) => a + (FGas.num(e.mengeZugefuegt) || 0), 0);
   const sumRem = entries.reduce((a, e) => a + (FGas.num(e.mengeEntnommen) || 0), 0);
   render(`
-    <div class="crumbs"><a href="#/">Kunden</a> › <a href="#/kunde/${c.id}">${esc(c.name)}</a></div>
+    ${crumbs({ c, l })}
     <div class="head-row">
       <h1>${esc(systemTitle(s))}</h1>
       <a class="btn" href="#/anlage/${id}/bearbeiten">Bearbeiten</a>
     </div>
-    ${dueSt.cls === 'danger' || dueSt.cls === 'warn' ? `<div class="notice ${dueSt.cls}"><strong>${esc(due.reason)}:</strong> ${esc(dueSt.text)}</div>` : ''}
+    ${alerts.map(([d, st]) => `<div class="notice ${st.cls}"><strong>${esc(d.reason)}:</strong> ${esc(st.text)}</div>`).join('')}
     <div class="card">
       <dl class="kv">
         <dt>Betreiber</dt><dd>${esc(c.name)}${customerAddress(c) ? ', ' + esc(customerAddress(c)) : ''}</dd>
-        <dt>Standort</dt><dd>${esc(s.standort) || '–'}</dd>
+        <dt>Standort</dt><dd>${esc(locationText(l, s)) || '–'}</dd>
         <dt>Anlagentyp</dt><dd>${esc(s.typ) || '–'}</dd>
         ${s.hersteller || s.modell || s.seriennr ? `<dt>Hersteller / Modell / S/N</dt><dd>${esc([s.hersteller, s.modell, s.seriennr].filter(Boolean).join(' / '))}</dd>` : ''}
         <dt>Kältemittel</dt><dd>${esc(s.kaeltemittel) || '–'} (GWP ${fmtNum(s.gwp, 3) || '–'})</dd>
@@ -325,7 +495,9 @@ function viewSystem(id) {
         <dt>CO2-Äquivalent</dt><dd>${isFinite(t) ? fmtNum(t, 2) + ' t' : '–'}</dd>
         <dt>Leckage-Erkennung</dt><dd>${s.leckageSystem === 'ja' ? 'ja' : 'nein'}${s.hermetisch ? ' · hermetisch geschlossen' : ''}</dd>
         <dt>Prüfintervall</dt><dd>${FGas.intervalLabel(FGas.interval(s))}</dd>
-        <dt>Nächste Kontrolle</dt><dd><span class="badge ${dueSt.cls}">${esc(dueSt.text)}</span></dd>
+        <dt>Nächste Dichtheitskontrolle</dt><dd><span class="badge ${dueSt.cls}">${esc(dueSt.text)}</span></dd>
+        <dt>Wartungsintervall</dt><dd>${FGas.maintInterval(s) ? 'alle ' + FGas.maintInterval(s) + ' Monate' : 'keine regelmäßige Wartung'}</dd>
+        <dt>Nächste Wartung</dt><dd><span class="badge ${maint ? maintSt.cls : ''}">${esc(maint ? maintSt.text : '–')}</span></dd>
         <dt>Errichtet</dt><dd>${esc([fmtDate(s.errichtetAm), s.errichtetDurch].filter(Boolean).join(' · ')) || '–'}</dd>
         ${entries.length ? `<dt>Summe zugefügt / entnommen</dt><dd>${fmtNum(sumAdd, 3)} kg / ${fmtNum(sumRem, 3)} kg</dd>` : ''}
       </dl>
@@ -393,7 +565,7 @@ function viewEntryForm(id, q) {
     ergebnis: '',
   };
   render(`
-    <div class="crumbs"><a href="#/">Kunden</a> › <a href="#/kunde/${c.id}">${esc(c.name)}</a> › <a href="#/anlage/${s.id}">${esc(systemTitle(s))}</a></div>
+    ${crumbs({ c, l: Store.location(s.locationId), s })}
     <h1>${e ? 'Eintrag bearbeiten' : 'Neuer Eintrag'}</h1>
     <form id="f">
       <fieldset class="card">
@@ -486,7 +658,7 @@ function viewEntry(id) {
   const locked = !!(e.sigTechniker || e.sigKunde);
   const row = (k, val) => (val ? `<dt>${k}</dt><dd>${esc(val)}</dd>` : '');
   render(`
-    <div class="crumbs"><a href="#/">Kunden</a> › <a href="#/kunde/${c.id}">${esc(c.name)}</a> › <a href="#/anlage/${s.id}">${esc(systemTitle(s))}</a></div>
+    ${crumbs({ c, l: Store.location(s.locationId), s })}
     <div class="head-row">
       <h1>${fmtDate(e.datum)} · ${esc(e.taetigkeit)}</h1>
       ${locked ? '' : `<a class="btn" href="#/eintrag/${id}/bearbeiten">Bearbeiten</a>`}
@@ -607,7 +779,7 @@ function viewSettings() {
       <p class="muted small">Alle Daten werden nur auf diesem Gerät im Browser gespeichert. Erstelle regelmäßig eine Sicherung
         (Aufbewahrungspflicht mindestens 5 Jahre!) und bewahre sie z. B. in der Cloud oder auf dem PC auf.
         Mit der Sicherungsdatei kannst du die Daten auch auf ein anderes Gerät übertragen.</p>
-      <p class="small">${st.customers.length} Kunden · ${st.systems.length} Anlagen · ${st.entries.length} Einträge</p>
+      <p class="small">${st.customers.length} Kunden · ${st.locations.length} Standorte · ${st.systems.length} Anlagen · ${st.entries.length} Einträge</p>
       <div class="actions">
         <button class="btn" id="exp">Sicherung exportieren (.json)</button>
         <label class="btn">Sicherung importieren<input type="file" id="imp" accept="application/json,.json" hidden></label>
@@ -656,12 +828,17 @@ function router() {
   const p = path.split('/').filter(Boolean);
   if (Signature && !document.getElementById('sigModal').hidden) document.getElementById('sigCancel').click();
 
-  if (p.length === 0) return viewCustomers(q);
+  if (p.length === 0) return viewHome(q);
   if (p[0] === 'einstellungen') return viewSettings();
   if (p[0] === 'kunde') {
     if (p[1] === 'neu') return viewCustomerForm(null);
     if (p[2] === 'bearbeiten') return viewCustomerForm(p[1]);
     return viewCustomer(p[1]);
+  }
+  if (p[0] === 'standort') {
+    if (p[1] === 'neu') return viewLocationForm(null, q);
+    if (p[2] === 'bearbeiten') return viewLocationForm(p[1], q);
+    return viewLocation(p[1]);
   }
   if (p[0] === 'anlage') {
     if (p[1] === 'neu') return viewSystemForm(null, q);

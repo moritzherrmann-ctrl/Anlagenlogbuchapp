@@ -5,9 +5,12 @@ nach Art. 7 der F-Gase-Verordnung (EU) 2024/573 – für **Moritz Herrmann Heizu
 
 ## Funktionen
 
+- **Startseite: nächste fällige Wartungen** – alle anstehenden Wartungen und Dichtheitskontrollen
+  aller Anlagen, nach Datum sortiert, überfällige rot markiert
 - **Kunden** (Betreiber) anlegen, bearbeiten, suchen
-- **Anlagen** je Kunde anlegen – alle Stammdaten der Vorlage:
-  Betreiber, Standort, Anlagen-Nr./Bezeichnung, Anlagentyp, Kältemittel, GWP-Wert,
+- **Standorte** je Kunde (z. B. Filialen, Lager) mit eigener Anschrift und Ansprechpartner
+- **Anlagen** je Standort anlegen – alle Stammdaten der Vorlage:
+  Betreiber, Standort (+ Aufstellort), Anlagen-Nr./Bezeichnung, Anlagentyp, Kältemittel, GWP-Wert,
   Füllmenge, CO2-Äquivalent (automatisch), Prüfintervall (automatisch berechnet, überschreibbar),
   Leckage-Erkennungssystem ja/nein, errichtet am/durch (Fachbetrieb, Zertifikat-Nr.)
 - **Einträge / Prüfungen** je Anlage: Datum, Tätigkeit, Menge zugefügt/entnommen,
@@ -17,8 +20,8 @@ nach Art. 7 der F-Gase-Verordnung (EU) 2024/573 – für **Moritz Herrmann Heizu
   Unterschriebene Einträge sind gesperrt.
 - **PDF-Ausgabe** je Anlage im Layout der Vorlage (Blatt 1 Stammdaten + Pflichten,
   ab Blatt 2 chronologische Einträge mit Unterschriften)
-- **Fälligkeiten**: nächste Dichtheitskontrolle bzw. Nachkontrolle nach Leckage, Übersicht
-  überfälliger Prüfungen auf der Startseite
+- **Fälligkeiten**: nächste Wartung (einstellbares Wartungsintervall je Anlage, Standard 12 Monate)
+  sowie nächste Dichtheitskontrolle bzw. Nachkontrolle nach Leckage
 - **Offline-fähig** und auf dem Handy/Tablet als App installierbar („Zum Home-Bildschirm“)
 - **Datensicherung** als JSON-Datei exportieren/importieren (auch zum Übertragen auf ein anderes Gerät)
 

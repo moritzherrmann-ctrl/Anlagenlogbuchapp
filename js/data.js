@@ -22,7 +22,7 @@ const Store = (() => {
   let state = emptyState();
 
   function emptyState() {
-    return { version: 1, settings: { ...DEFAULT_SETTINGS }, customers: [], systems: [], entries: [] };
+    return { version: 2, settings: { ...DEFAULT_SETTINGS }, customers: [], locations: [], systems: [], entries: [] };
   }
 
   function openDb() {
@@ -47,13 +47,37 @@ const Store = (() => {
   function normalize(s) {
     const base = emptyState();
     if (!s || typeof s !== 'object') return base;
-    return {
-      version: 1,
+    return migrate({
+      version: 2,
       settings: { ...base.settings, ...(s.settings || {}) },
       customers: Array.isArray(s.customers) ? s.customers : [],
+      locations: Array.isArray(s.locations) ? s.locations : [],
       systems: Array.isArray(s.systems) ? s.systems : [],
       entries: Array.isArray(s.entries) ? s.entries : [],
-    };
+    });
+  }
+
+  /** Version 1 kannte keine Standorte: je Kunde und Standort-Text einen Standort anlegen. */
+  function migrate(s) {
+    const now = new Date().toISOString();
+    for (const sys of s.systems) {
+      if (sys.locationId && s.locations.some((l) => l.id === sys.locationId)) continue;
+      const cust = s.customers.find((c) => c.id === sys.customerId) || {};
+      const custAddr = customerAddress(cust);
+      const text = (sys.standort || '').trim();
+      const sameAsCustomer = !text || text === custAddr;
+      let loc = s.locations.find((l) => l.customerId === sys.customerId && l.migratedFrom === (sameAsCustomer ? '' : text));
+      if (!loc) {
+        loc = sameAsCustomer
+          ? { name: 'Hauptstandort', strasse: cust.strasse || '', plz: cust.plz || '', ort: cust.ort || '' }
+          : { name: text, strasse: '', plz: '', ort: '' };
+        Object.assign(loc, { id: uid(), customerId: sys.customerId, migratedFrom: sameAsCustomer ? '' : text, createdAt: now, updatedAt: now });
+        s.locations.push(loc);
+      }
+      sys.locationId = loc.id;
+      delete sys.standort;
+    }
+    return s;
   }
 
   async function load() {
@@ -88,6 +112,11 @@ const Store = (() => {
   // --- Kunden ---
   const customer = (id) => state.customers.find((c) => c.id === id);
   const systemsOf = (customerId) => state.systems.filter((s) => s.customerId === customerId);
+  const location = (id) => state.locations.find((l) => l.id === id);
+  const locationsOf = (customerId) => state.locations
+    .filter((l) => l.customerId === customerId)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'));
+  const systemsAt = (locationId) => state.systems.filter((s) => s.locationId === locationId);
   const system = (id) => state.systems.find((s) => s.id === id);
   const entry = (id) => state.entries.find((e) => e.id === id);
   const entriesOf = (systemId) => state.entries
@@ -112,7 +141,15 @@ const Store = (() => {
     const sysIds = new Set(systemsOf(id).map((s) => s.id));
     state.entries = state.entries.filter((e) => !sysIds.has(e.systemId));
     state.systems = state.systems.filter((s) => s.customerId !== id);
+    state.locations = state.locations.filter((l) => l.customerId !== id);
     state.customers = state.customers.filter((c) => c.id !== id);
+    return save();
+  }
+  function removeLocation(id) {
+    const sysIds = new Set(systemsAt(id).map((s) => s.id));
+    state.entries = state.entries.filter((e) => !sysIds.has(e.systemId));
+    state.systems = state.systems.filter((s) => s.locationId !== id);
+    state.locations = state.locations.filter((l) => l.id !== id);
     return save();
   }
   function removeSystem(id) {
@@ -126,8 +163,8 @@ const Store = (() => {
   }
 
   return {
-    load, save, get, replace, uid, customer, system, entry, systemsOf, entriesOf,
-    upsert, removeCustomer, removeSystem, removeEntry, DEFAULT_SETTINGS,
+    load, save, get, replace, uid, customer, location, locationsOf, system, entry, systemsOf, systemsAt, entriesOf,
+    upsert, removeCustomer, removeLocation, removeSystem, removeEntry, DEFAULT_SETTINGS,
   };
 })();
 
@@ -220,6 +257,30 @@ const FGas = (() => {
     return { date: addMonths(base, m), reason: 'Dichtheitskontrolle' };
   }
 
+  /** Wartungsintervall in Monaten (Standard 12, 0 = keine regelmäßige Wartung). */
+  function maintInterval(sys) {
+    if (sys.wartungsintervall === undefined || sys.wartungsintervall === '') return 12;
+    return Number(sys.wartungsintervall) || 0;
+  }
+
+  /** Nächste fällige Wartung (letzte Wartung/Instandhaltung bzw. Errichtung + Intervall). */
+  function nextMaintenance(sys, entries) {
+    const m = maintInterval(sys);
+    if (!m) return null;
+    const done = entries.filter((e) => e.datum && (e.taetigkeit === 'Wartung/Instandhaltung' || e.taetigkeit === 'Installation'));
+    const last = done[done.length - 1];
+    const base = last ? last.datum : sys.errichtetAm;
+    if (!base) return { date: null, reason: 'Wartung', kind: 'wartung' };
+    return { date: addMonths(base, m), reason: 'Wartung', kind: 'wartung' };
+  }
+
+  /** Alle anstehenden Termine einer Anlage (Wartung + Dichtheitskontrolle), früheste zuerst. */
+  function dueItems(sys, entries) {
+    const leak = nextDue(sys, entries);
+    const items = [nextMaintenance(sys, entries), leak && { ...leak, kind: 'dichtheit' }].filter(Boolean);
+    return items.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+  }
+
   function dueStatus(due) {
     if (!due) return { cls: '', text: 'keine Prüfpflicht' };
     if (!due.date) return { cls: 'warn', text: 'Prüfung offen' };
@@ -229,7 +290,10 @@ const FGas = (() => {
     return { cls: 'ok', text: 'fällig ' + fmtDate(due.date) };
   }
 
-  return { REFRIGERANTS, TAETIGKEITEN, HERKUNFT, ERGEBNIS, num, co2e, autoInterval, interval, intervalLabel, addMonths, nextDue, dueStatus };
+  return {
+    REFRIGERANTS, TAETIGKEITEN, HERKUNFT, ERGEBNIS, num, co2e, autoInterval, interval, intervalLabel, addMonths,
+    nextDue, maintInterval, nextMaintenance, dueItems, dueStatus,
+  };
 })();
 
 function fmtDate(iso) {
@@ -253,4 +317,12 @@ function fmtNum(v, digits = 2) {
 function customerAddress(c) {
   if (!c) return '';
   return [c.strasse, [c.plz, c.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+}
+
+/** Standort als Text: Name, Anschrift (+ Aufstellort der Anlage). */
+function locationText(loc, sys) {
+  if (!loc) return sys && sys.aufstellort ? sys.aufstellort : '';
+  const addr = customerAddress(loc);
+  const name = loc.name && loc.name !== addr ? loc.name : '';
+  return [name, addr, sys && sys.aufstellort ? 'Aufstellort: ' + sys.aufstellort : ''].filter(Boolean).join(', ');
 }

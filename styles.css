@@ -180,3 +180,13 @@ legend { font-weight: 700; padding: 0 6px; }
 .entry-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 
 @media print { .topbar, .actions { display: none; } }
+
+.date-chip { flex: 0 0 auto; width: 54px; text-align: center; border-radius: 8px; padding: 4px 0; background: var(--surface-2); color: var(--muted); line-height: 1.15; }
+.date-chip strong { display: block; font-size: 1rem; color: var(--text); }
+.date-chip span { font-size: .72rem; }
+.date-chip.danger { background: color-mix(in srgb, var(--danger) 15%, transparent); }
+.date-chip.danger strong { color: var(--danger); }
+.date-chip.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); }
+.date-chip.warn strong { color: var(--warn); }
+.date-chip.ok strong { color: var(--ok); }
+details summary { cursor: pointer; }

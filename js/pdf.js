@@ -97,6 +97,8 @@ const PdfExport = (() => {
     const settings = st.settings;
     const sys = Store.system(sysId);
     const cust = Store.customer(sys.customerId);
+    const loc = Store.location(sys.locationId);
+    const standort = locationText(loc, sys);
     const entries = Store.entriesOf(sysId);
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
     doc.setProperties({ title: `Anlagenbuch ${systemLabel(sys)}`, author: settings.firma, creator: 'Anlagenbuch-App' });
@@ -135,7 +137,7 @@ const PdfExport = (() => {
       columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 38 }, 2: { cellWidth: 54 }, 3: { cellWidth: 38 } },
       body: [
         [label('Betreiber (Name, Anschrift)'), wide(betreiber)],
-        [label('Anlagen-Standort'), wide(sys.standort)],
+        [label('Anlagen-Standort'), wide(standort)],
         [label('Anlagen-Nr. / Bezeichnung'), wide(systemLabel(sys))],
         [label('Anlagentyp (z. B. Kaltwassersatz, VRF, Kühlzelle)'), wide(sys.typ)],
         [label('Hersteller / Modell / Serien-Nr.'), wide(geraet)],
@@ -143,7 +145,7 @@ const PdfExport = (() => {
         [label('Füllmenge (kg)'), fmtNum(sys.fuellmenge, 3), label('CO2-Äquivalent (t) = kg × GWP ÷ 1.000'), isFinite(t) ? fmtNum(t, 2) + ' t' : ''],
         [label('Prüfintervall Dichtheitskontrolle'), FGas.intervalLabel(interval), label('Leckage-Erkennungssystem vorhanden?'), ''],
         [label('Errichtet am / durch (Fachbetrieb, Zertifikat-Nr.)'), wide(errichtet)],
-        [label('Nächste Kontrolle fällig'), wide(due ? (due.date ? fmtDate(due.date) + ' – ' + due.reason : due.reason) : 'keine Prüfpflicht')],
+        [label('Nächste Dichtheitskontrolle fällig'), wide(due ? (due.date ? fmtDate(due.date) + ' – ' + due.reason : due.reason) : 'keine Prüfpflicht')],
       ],
       didDrawCell: (d) => {
         if (d.section === 'body' && d.row.index === leakRowIndex && d.column.index === 3) {
@@ -177,7 +179,7 @@ const PdfExport = (() => {
     doc.setFont('helvetica', 'bold');
     doc.text('Anlage:', M, y + 2);
     doc.setFont('helvetica', 'normal');
-    doc.text([systemLabel(sys), sys.standort, cust && cust.name].filter(Boolean).join(' · '), M + 14, y + 2);
+    doc.text([systemLabel(sys), standort, cust && cust.name].filter(Boolean).join(' · '), M + 14, y + 2);
     y += 6;
 
     const sigRows = [];
