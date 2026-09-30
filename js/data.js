@@ -60,6 +60,7 @@ const Store = (() => {
   /** Version 1 kannte keine Standorte: je Kunde und Standort-Text einen Standort anlegen. */
   function migrate(s) {
     const now = new Date().toISOString();
+    for (const sys of s.systems) FGas.fixGwp(sys);
     for (const sys of s.systems) {
       if (sys.locationId && s.locations.some((l) => l.id === sys.locationId)) continue;
       const cust = s.customers.find((c) => c.id === sys.customerId) || {};
@@ -196,35 +197,70 @@ const Store = (() => {
 })();
 
 const FGas = (() => {
-  // GWP-Werte (100 Jahre) gemäß Anhang I/II VO (EU) 2024/573 bzw. daraus berechnete Gemische.
+  // GWP-Werte laut Tabelle „Fluorierte Treibhausgase: GWP-Werte und Beispiele für CO2-Äquivalente“
+  // (Bundesfachschule Kälte-Klima-Technik, 2015 – Basis IPCC AR4 / VO (EU) 517/2014).
   // Werte sind in der Anlage editierbar.
   const REFRIGERANTS = {
-    'R-32': 771,
-    'R-134a': 1530,
-    'R-404A': 4728,
-    'R-407A': 2262,
-    'R-407C': 1908,
-    'R-407F': 1965,
-    'R-410A': 2256,
-    'R-417A': 2508,
-    'R-422D': 2917,
-    'R-448A': 1494,
-    'R-449A': 1504,
-    'R-450A': 643,
-    'R-452A': 2292,
-    'R-452B': 779,
-    'R-454A': 270,
-    'R-454B': 531,
-    'R-454C': 166,
-    'R-455A': 166,
-    'R-507A': 4775,
-    'R-513A': 673,
-    'R-1234yf': 0.5,
-    'R-1234ze(E)': 1.4,
-    'R-290 (Propan)': 0.02,
-    'R-600a (Isobutan)': 0.006,
-    'R-744 (CO2)': 1,
+    'R-23': 14800,
+    'R-32': 675,
+    'R-41': 92,
+    'R-125': 3500,
+    'R-134': 1100,
+    'R-134a': 1430,
+    'R-143': 353,
+    'R-143a': 4470,
+    'R-152': 53,
+    'R-152a': 124,
+    'R-161': 12,
+    'R-227ea': 3220,
+    'R-236cb': 1340,
+    'R-236ea': 1370,
+    'R-236fa': 9810,
+    'R-245ca': 693,
+    'R-245fa': 1030,
+    'R-365mfc': 794,
+    'R-14': 7390,
+    'R-116': 12200,
+    'R-218': 8830,
+    'R-C318': 10300,
+    'R-404A': 3922,
+    'R-407A': 2107,
+    'R-407B': 2804,
+    'R-407C': 1774,
+    'R-407D': 1627,
+    'R-407E': 1552,
+    'R-407F': 1825,
+    'R-410A': 2088,
+    'R-413A': 2053,
+    'R-417A': 2346,
+    'R-422A': 3143,
+    'R-422D': 2729,
+    'R-427A': 2138,
+    'R-437A': 1805,
+    'R-438A': 2265,
+    'R-448A': 1387,
+    'R-449A': 1397,
+    'R-507': 3990,
+    'R-508A': 13214,
+    'R-508B': 13396,
   };
+
+  // Werte der früheren App-Version – gespeicherte Anlagen mit diesen Werten werden automatisch korrigiert.
+  const OLD_GWP = {
+    'R-32': 771, 'R-134a': 1530, 'R-404A': 4728, 'R-407A': 2262, 'R-407C': 1908, 'R-407F': 1965,
+    'R-410A': 2256, 'R-417A': 2508, 'R-422D': 2917, 'R-448A': 1494, 'R-449A': 1504, 'R-507A': 4775,
+  };
+  const RENAMED = { 'R-507A': 'R-507' };
+
+  /** Alten App-Standardwert durch Tabellenwert ersetzen (manuell geänderte Werte bleiben). */
+  function fixGwp(sys) {
+    const old = OLD_GWP[sys.kaeltemittel];
+    if (old === undefined || num(sys.gwp) !== old) return false;
+    const name = RENAMED[sys.kaeltemittel] || sys.kaeltemittel;
+    sys.kaeltemittel = name;
+    sys.gwp = String(REFRIGERANTS[name]);
+    return true;
+  }
 
   const TAETIGKEITEN = ['Installation', 'Wartung/Instandhaltung', 'Reparatur', 'Dichtheitskontrolle', 'Rückgewinnung', 'Stilllegung'];
   const HERKUNFT = ['neu', 'recycelt', 'aufgearbeitet'];
@@ -319,7 +355,7 @@ const FGas = (() => {
 
   return {
     REFRIGERANTS, TAETIGKEITEN, HERKUNFT, ERGEBNIS, num, co2e, autoInterval, interval, intervalLabel, addMonths,
-    nextDue, maintInterval, nextMaintenance, dueItems, dueStatus,
+    nextDue, maintInterval, nextMaintenance, dueItems, dueStatus, fixGwp,
   };
 })();
 

@@ -44,8 +44,8 @@ die Aufzeichnungen müssen mindestens 5 Jahre aufbewahrt werden.
 
 ## Hinweise
 
-- GWP-Werte der Kältemittel-Auswahl nach VO (EU) 2024/573 (Gemische berechnet); der Wert
-  ist in jeder Anlage editierbar und sollte mit dem Typenschild/Datenblatt abgeglichen werden.
+- GWP-Werte der Kältemittel-Auswahl laut Tabelle der Bundesfachschule Kälte-Klima-Technik
+  (Basis IPCC AR4 / VO (EU) 517/2014); der Wert ist in jeder Anlage editierbar.
 - Prüfintervalle: ab 5 t CO2e alle 12 Monate, ab 50 t alle 6, ab 500 t alle 3 Monate;
   mit Leckage-Erkennungssystem verdoppelt; hermetisch geschlossene Einrichtungen unter 10 t CO2e ausgenommen.
 - Verwendete Bibliotheken: [jsPDF](https://github.com/parallax/jsPDF) und
