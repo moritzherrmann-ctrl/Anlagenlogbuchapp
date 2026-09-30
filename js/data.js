@@ -243,12 +243,30 @@ const FGas = (() => {
     'R-507': 3990,
     'R-508A': 13214,
     'R-508B': 13396,
+    // Ergänzungen (nicht in der Tabelle), GWP auf gleicher Basis (AR4) bzw. aus den Gemisch-Anteilen berechnet
+    'R-450A': 605,
+    'R-452A': 2140,
+    'R-452B': 698,
+    'R-454A': 239,
+    'R-454B': 466,
+    'R-454C': 148,
+    'R-455A': 148,
+    'R-513A': 631,
+    'R-1234yf': 4,
+    'R-1234ze(E)': 7,
+    'R-290 (Propan)': 3,
+    'R-600a (Isobutan)': 3,
+    'R-1270 (Propen)': 2,
+    'R-744 (CO2)': 1,
+    'R-717 (Ammoniak)': 0,
   };
 
   // Werte der früheren App-Version – gespeicherte Anlagen mit diesen Werten werden automatisch korrigiert.
   const OLD_GWP = {
     'R-32': 771, 'R-134a': 1530, 'R-404A': 4728, 'R-407A': 2262, 'R-407C': 1908, 'R-407F': 1965,
     'R-410A': 2256, 'R-417A': 2508, 'R-422D': 2917, 'R-448A': 1494, 'R-449A': 1504, 'R-507A': 4775,
+    'R-450A': 643, 'R-452A': 2292, 'R-452B': 779, 'R-454A': 270, 'R-454B': 531, 'R-454C': 166, 'R-455A': 166,
+    'R-513A': 673, 'R-1234yf': 0.5, 'R-1234ze(E)': 1.4, 'R-290 (Propan)': 0.02, 'R-600a (Isobutan)': 0.006,
   };
   const RENAMED = { 'R-507A': 'R-507' };
 
