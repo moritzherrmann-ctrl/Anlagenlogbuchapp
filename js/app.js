@@ -528,8 +528,8 @@ function viewSystem(id) {
         ${entries.length ? `<dt>Summe zugefügt / entnommen</dt><dd>${fmtNum(sumAdd, 3)} kg / ${fmtNum(sumRem, 3)} kg</dd>` : ''}
       </dl>
       <div class="actions">
-        <button class="btn" id="pdf">PDF herunterladen</button>
-        ${navigator.canShare ? '<button class="btn" id="share">PDF teilen</button>' : ''}
+        <button class="btn" id="pdf">${FileOut.isNative() ? 'PDF speichern / teilen' : 'PDF herunterladen'}</button>
+        ${FileOut.canShareFiles() && !FileOut.isNative() ? '<button class="btn" id="share">PDF teilen</button>' : ''}
       </div>
     </div>
     <div class="head-row">
@@ -551,21 +551,18 @@ function viewSystem(id) {
         </div><span class="chev">›</span></a></li>`).join('')}</ul>`
     : `<div class="empty">Noch keine Einträge. Lege die erste Prüfung/Tätigkeit an.</div>`}
   `);
-  document.getElementById('pdf').addEventListener('click', () => {
+  document.getElementById('pdf').addEventListener('click', async () => {
     try {
-      PdfExport.download(id);
+      await PdfExport.download(id);
     } catch (err) {
       console.error(err);
-      alert('PDF konnte nicht erstellt werden: ' + err.message);
+      if (err.name !== 'AbortError' && !/cancel/i.test(err.message)) alert('PDF konnte nicht erstellt werden: ' + err.message);
     }
   });
   const share = document.getElementById('share');
   if (share) share.addEventListener('click', async () => {
     try {
-      const blob = PdfExport.build(id).output('blob');
-      const file = new File([blob], PdfExport.filename(id), { type: 'application/pdf' });
-      if (!navigator.canShare({ files: [file] })) { alert('Teilen von Dateien wird auf diesem Gerät nicht unterstützt.'); return; }
-      await navigator.share({ files: [file], title: 'Anlagenbuch ' + systemTitle(s) });
+      await FileOut.share(PdfExport.build(id).output('blob'), PdfExport.filename(id), 'Anlagenbuch ' + systemTitle(s));
     } catch (err) {
       if (err.name !== 'AbortError') alert('Teilen fehlgeschlagen: ' + err.message);
     }
@@ -818,15 +815,13 @@ function viewSettings() {
     await Store.save();
     toast('Einstellungen gespeichert');
   });
-  document.getElementById('exp').addEventListener('click', () => {
+  document.getElementById('exp').addEventListener('click', async () => {
     const blob = new Blob([JSON.stringify(Store.get(), null, 1)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `Anlagenbuch_Sicherung_${today()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    try {
+      await FileOut.save(blob, `Anlagenbuch_Sicherung_${today()}.json`, 'Anlagenbuch-Sicherung');
+    } catch (err) {
+      if (!/cancel/i.test(err.message)) alert('Sicherung fehlgeschlagen: ' + err.message);
+    }
   });
   document.getElementById('imp').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -883,7 +878,7 @@ function router() {
   await Store.load();
   window.addEventListener('hashchange', router);
   router();
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  if ('serviceWorker' in navigator && location.protocol !== 'file:' && !FileOut.isNative()) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 })();

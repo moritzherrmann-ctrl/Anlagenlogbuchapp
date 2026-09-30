@@ -285,14 +285,7 @@ const PdfExport = (() => {
   }
 
   function download(sysId) {
-    const blob = build(sysId).output('blob');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename(sysId);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    return FileOut.save(build(sysId).output('blob'), filename(sysId), 'Anlagenbuch');
   }
 
   return { build, filename, download };

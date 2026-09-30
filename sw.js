@@ -1,10 +1,11 @@
 /* Offline-Cache für die App-Dateien. Bei Änderungen VERSION erhöhen. */
-const VERSION = 'anlagenbuch-v5';
+const VERSION = 'anlagenbuch-v6';
 const FILES = [
   './',
   'index.html',
   'styles.css',
   'manifest.webmanifest',
+  'js/files.js',
   'js/data.js',
   'js/signature.js',
   'js/pdf.js',

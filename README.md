@@ -50,3 +50,21 @@ die Aufzeichnungen müssen mindestens 5 Jahre aufbewahrt werden.
   mit Leckage-Erkennungssystem verdoppelt; hermetisch geschlossene Einrichtungen unter 10 t CO2e ausgenommen.
 - Verwendete Bibliotheken: [jsPDF](https://github.com/parallax/jsPDF) und
   [jsPDF-AutoTable](https://github.com/simonbengtsson/jsPDF-AutoTable) (MIT, im Ordner `vendor/`).
+
+## Android-App (APK)
+
+Die Web-App wird mit [Capacitor](https://capacitorjs.com) in eine Android-App verpackt.
+Gebaut wird automatisch per GitHub Actions (`.github/workflows/android.yml`) bei jedem Push
+oder manuell über *Actions → Android-APK → Run workflow*.
+
+- **Download der aktuellen Version:**
+  https://github.com/moritzherrmann-ctrl/Anlagenlogbuchapp/releases/latest/download/Anlagenbuch.apk
+- **Signierung:** Repository-Secrets `ANDROID_KEYSTORE_BASE64` und `ANDROID_KEYSTORE_PASSWORD`
+  (Alias `anlagenbuch`). Ohne Secrets wird nur eine Test-APK als Workflow-Artefakt gebaut.
+  Den Signierschlüssel sicher aufbewahren – ohne ihn sind keine Updates mehr möglich.
+- In der App öffnen „PDF speichern / teilen“ und „Sicherung exportieren“ das Android-Teilen-Menü.
+- Die App-Daten liegen getrennt von der Browser-Version. Umzug über
+  *Einstellungen → Sicherung exportieren/importieren*.
+
+Lokal bauen (Android Studio / Android SDK nötig): `npm ci && npm run android:add`,
+dann `android/` in Android Studio öffnen.

@@ -1,0 +1,8 @@
+{
+  "appId": "com.herrmannheizungklima.anlagenbuch",
+  "appName": "Anlagenbuch",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

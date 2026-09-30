@@ -1,0 +1,21 @@
+{
+  "name": "anlagenbuch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Anlagenbuch / Logbuch für Kälte- und Klimaanlagen – Android-App via Capacitor",
+  "scripts": {
+    "build:www": "node scripts/build-www.js",
+    "android:add": "npm run build:www && cap add android && capacitor-assets generate --android --iconBackgroundColor \"#0b5cab\" --splashBackgroundColor \"#0b5cab\"",
+    "android:sync": "npm run build:www && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.1.3",
+    "@capacitor/share": "^8.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.2"
+  }
+}

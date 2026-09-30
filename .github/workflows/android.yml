@@ -1,0 +1,90 @@
+# Baut die Android-App (APK) und stellt sie als GitHub-Release zum Download bereit.
+# Signierung: Repository-Secrets ANDROID_KEYSTORE_BASE64 und ANDROID_KEYSTORE_PASSWORD
+# (Alias „anlagenbuch“). Ohne Secrets entsteht nur eine Test-APK als Workflow-Artefakt.
+name: Android-APK
+
+on:
+  push:
+    branches: [claude/klimaanlagen-logbuch-app-a5aejy]
+    paths-ignore: ['README.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      VERSION: 1.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Android-Projekt erzeugen
+        run: npm run android:add
+
+      - name: Versionsnummer setzen
+        run: |
+          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"$VERSION\"/" android/app/build.gradle
+          grep -n "versionCode\|versionName" android/app/build.gradle
+
+      - name: APK bauen
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KS_PASS" ]; then
+            ./gradlew assembleRelease --no-daemon
+            BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            "$BT/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias anlagenbuch \
+              --ks-pass env:KS_PASS --key-pass env:KS_PASS --out ../Anlagenbuch.apk "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" verify ../Anlagenbuch.apk
+            rm -f "$RUNNER_TEMP/release.keystore"
+            echo "SIGNED=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Keine Signier-Secrets hinterlegt – es wird nur eine Test-APK gebaut."
+            ./gradlew assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk ../Anlagenbuch-TEST.apk
+          fi
+
+      - name: APK als Artefakt speichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: Anlagenbuch-${{ env.VERSION }}
+          path: Anlagenbuch*.apk
+
+      - name: Release veröffentlichen
+        if: env.SIGNED == '1'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-${{ env.VERSION }}
+          name: Anlagenbuch Android ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: Anlagenbuch.apk
+          body: |
+            Android-App „Anlagenbuch“ Version ${{ env.VERSION }}.
+            Installation: Anlagenbuch.apk auf dem Handy herunterladen und öffnen
+            (einmalig „Installation aus unbekannten Quellen“ erlauben).
