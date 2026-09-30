@@ -1,4 +1,4 @@
-/* PDF-Ausgabe im Layout der Vorlage „Anlagenbuch / Logbuch für Kälteanlagen“ */
+/* PDF-Ausgabe im Layout der Vorlage „Anlagenbuch / Logbuch für Kälteanlagen“ – auch für Heizung und Trinkwasser */
 'use strict';
 
 const PdfExport = (() => {
@@ -91,11 +91,168 @@ const PdfExport = (() => {
     return [sys.anlagenNr, sys.bezeichnung].filter(Boolean).join(' – ');
   }
 
+  /** Unterschriften (Techniker/Betreiber) in eine Tabellenzelle zeichnen. */
+  function drawSignatures(doc, d, sigs = []) {
+    const slotH = (d.cell.height - 1) / Math.max(1, sigs.length);
+    sigs.forEach((s, i) => {
+      const maxW = d.cell.width - 3;
+      const maxH = slotH - 4.5;
+      const ratio = Math.min(maxW / s.w, maxH / s.h);
+      const top = d.cell.y + 0.8 + i * slotH;
+      try { doc.addImage(s.img, 'PNG', d.cell.x + 1.5, top, s.w * ratio, s.h * ratio); } catch (err) { console.warn(err); }
+      doc.setFontSize(5.2);
+      doc.setTextColor(...GREY);
+      const role = s.role === 'kunde' ? 'Betr.' : 'Techn.';
+      let caption = `${role} ${s.name || ''}, ${fmtDate(s.at)}`;
+      while (doc.getTextWidth(caption) > maxW && caption.length > 10) caption = caption.slice(0, -2);
+      doc.text(caption, d.cell.x + 1.5, top + slotH - 1.2);
+      doc.setTextColor(0);
+    });
+  }
+
+  /** Kopf/Fuß auf allen Seiten. */
+  function finish(doc, settings) {
+    const total = doc.internal.getNumberOfPages();
+    for (let p = 1; p <= total; p++) {
+      doc.setPage(p);
+      header(doc, settings);
+      footer(doc, settings, p, total);
+    }
+    return doc;
+  }
+
+  /** Tabelle, die bei Seitenumbruch im Querformat weiterläuft. */
+  function landscapeTable(doc, opts) {
+    const origAddPage = doc.addPage;
+    doc.addPage = function () { return origAddPage.call(this, 'a4', 'landscape'); };
+    try { doc.autoTable(opts); } finally { doc.addPage = origAddPage; }
+  }
+
+  function footnote(doc, text) {
+    let fy = doc.lastAutoTable.finalY + 5;
+    if (fy > doc.internal.pageSize.getHeight() - 26) {
+      doc.addPage('a4', 'landscape');
+      fy = 22;
+    }
+    doc.setFontSize(7.5);
+    doc.setTextColor(...GREY);
+    doc.text(text, M, fy, { maxWidth: doc.internal.pageSize.getWidth() - 2 * M });
+    doc.setTextColor(0);
+  }
+
+  function betreiberText(cust) {
+    return [cust && cust.name, cust && cust.ansprechpartner ? 'z. Hd. ' + cust.ansprechpartner : '', customerAddress(cust)]
+      .filter(Boolean).join(', ');
+  }
+
+  /** Anlagenbuch für Heizungs- und Trinkwasseranlagen (Felder aus der Bereichs-Definition). */
+  function buildGeneric(sys) {
+    const { jsPDF } = window.jspdf;
+    const settings = Store.get().settings;
+    const area = Areas.get(Areas.of(sys));
+    const cust = Store.customer(sys.customerId);
+    const standort = locationText(Store.location(sys.locationId), sys);
+    const entries = Store.entriesOf(sys.id);
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    doc.setProperties({ title: `Anlagenbuch ${systemLabel(sys)}`, author: settings.firma, creator: 'Anlagenbuch-App' });
+    const pw = doc.internal.pageSize.getWidth();
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(area.pdfTitle.length > 42 ? 15 : 17);
+    doc.text(area.pdfTitle, M, 24);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...GREY);
+    doc.text(area.pdfSubtitle, M, 30, { maxWidth: pw - 2 * M });
+    doc.setTextColor(0);
+    let y = sectionTitle(doc, 1, 'Anlagen-Stammdaten', 40);
+
+    const label = (t) => ({ content: t, styles: { fillColor: LABEL_BG, fontStyle: 'bold', textColor: [60, 70, 85] } });
+    const maint = FGas.nextMaintenance(sys, entries);
+    const m = FGas.maintInterval(sys);
+    const rows = [
+      [label('Betreiber (Name, Anschrift)'), betreiberText(cust)],
+      [label('Anlagen-Standort'), standort],
+      [label('Anlagen-Nr. / Bezeichnung'), systemLabel(sys)],
+      ...area.systemSections.flatMap((sec) => Areas.visible(sec.fields, sys).map((f) => [label(f.label), Areas.display(f, sys[f.name])])),
+      [label('Inbetriebnahme / errichtet durch'), [sys.errichtetAm ? fmtDate(sys.errichtetAm) : '', sys.errichtetDurch].filter(Boolean).join(' · ')],
+      [label('Wartungsintervall'), m ? `alle ${m} Monate` : 'keine regelmäßige Wartung'],
+      [label('Nächste Wartung fällig'), maint ? (maint.date ? fmtDate(maint.date) : 'offen') : '–'],
+    ];
+    doc.autoTable({
+      startY: y,
+      margin: { left: M, right: M, bottom: 24 },
+      theme: 'grid',
+      styles: { font: 'helvetica', fontSize: 9, cellPadding: 2, lineColor: LINE, lineWidth: 0.25, textColor: [20, 20, 20], valign: 'middle', minCellHeight: 8 },
+      columnStyles: { 0: { cellWidth: 62 } },
+      body: rows,
+    });
+
+    y = doc.lastAutoTable.finalY + 12;
+    if (y > doc.internal.pageSize.getHeight() - 60) { doc.addPage('a4', 'portrait'); y = 24; }
+    y = sectionTitle(doc, 2, 'Hinweise', y) + 1;
+    for (const [lead, text] of area.notes) y = richParagraph(doc, lead, text, M, y, pw - 2 * M, 4.3) + 1.5;
+
+    // Einträge im Querformat
+    doc.addPage('a4', 'landscape');
+    y = sectionTitle(doc, 3, 'Einträge (chronologisch)', 22);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Anlage:', M, y + 2);
+    doc.setFont('helvetica', 'normal');
+    doc.text([systemLabel(sys), standort, cust && cust.name].filter(Boolean).join(' · '), M + 14, y + 2, { maxWidth: 250 });
+    y += 6;
+
+    const measureFields = area.entrySections.flatMap((sec) => Areas.visible(sec.fields, sys));
+    const sigRows = [];
+    const body = entries.map((e) => {
+      const sigs = [e.sigTechniker, e.sigKunde].filter(Boolean);
+      sigRows.push(sigs);
+      const mess = measureFields.map((f) => (Areas.display(f, e[f.name]) ? `${f.label}: ${Areas.display(f, e[f.name])}` : '')).filter(Boolean).join('\n');
+      const arbeiten = [...(e.arbeiten || []).map((a) => '• ' + a), e.ersatzteile ? 'Ersatzteile: ' + e.ersatzteile : ''].filter(Boolean).join('\n');
+      return [
+        fmtDate(e.datum),
+        e.taetigkeit || '',
+        mess,
+        arbeiten,
+        [e.ergebnis, e.maengel].filter(Boolean).join('\n'),
+        [e.fachbetrieb, e.techniker].filter(Boolean).join('\n'),
+        { content: '', styles: { minCellHeight: sigs.length > 1 ? 26 : 15 } },
+        e.bemerkung || '',
+      ];
+    });
+    const blank = Math.max(3, 8 - body.length);
+    for (let i = 0; i < blank; i++) {
+      sigRows.push([]);
+      body.push(['', '', '', '', '', '', { content: '', styles: { minCellHeight: 11 } }, '']);
+    }
+    landscapeTable(doc, {
+      startY: y,
+      margin: { left: M, right: M, top: 18, bottom: 24 },
+      theme: 'grid',
+      rowPageBreak: 'avoid',
+      head: [['Datum', 'Tätigkeit *', 'Messwerte', 'Durchgeführte Arbeiten', 'Ergebnis / Mängel', 'Fachbetrieb / Techniker', 'Unterschrift', 'Bemerkung']],
+      body,
+      styles: { font: 'helvetica', fontSize: 7.8, cellPadding: 1.6, lineColor: LINE, lineWidth: 0.25, textColor: [20, 20, 20], valign: 'top', overflow: 'linebreak' },
+      headStyles: { fillColor: LABEL_BG, textColor: [40, 50, 65], fontStyle: 'bold', fontSize: 7.5, valign: 'middle' },
+      columnStyles: {
+        0: { cellWidth: 19 }, 1: { cellWidth: 26 }, 2: { cellWidth: 46 }, 3: { cellWidth: 52 },
+        4: { cellWidth: 34 }, 5: { cellWidth: 28 }, 6: { cellWidth: 38 }, 7: { cellWidth: 24 },
+      },
+      didDrawCell: (d) => {
+        if (d.section === 'body' && d.column.index === 6) drawSignatures(doc, d, sigRows[d.row.index]);
+      },
+    });
+    footnote(doc, '* Tätigkeit: ' + area.taetigkeiten.join(' · ') + '.');
+    return finish(doc, settings);
+  }
+
   function build(sysId) {
     const { jsPDF } = window.jspdf;
     const st = Store.get();
     const settings = st.settings;
     const sys = Store.system(sysId);
+    if (!Areas.isKaelte(sys)) return buildGeneric(sys);
     const cust = Store.customer(sys.customerId);
     const loc = Store.location(sys.locationId);
     const standort = locationText(loc, sys);
@@ -121,8 +278,7 @@ const PdfExport = (() => {
     const t = FGas.co2e(sys);
     const interval = FGas.interval(sys);
     const due = FGas.nextDue(sys, entries);
-    const betreiber = [cust && cust.name, cust && cust.ansprechpartner ? 'z. Hd. ' + cust.ansprechpartner : '', customerAddress(cust)]
-      .filter(Boolean).join(', ');
+    const betreiber = betreiberText(cust);
     const errichtet = [sys.errichtetAm ? fmtDate(sys.errichtetAm) : '', sys.errichtetDurch].filter(Boolean).join(' · ');
     const geraet = [sys.hersteller, sys.modell, sys.seriennr ? 'S/N ' + sys.seriennr : ''].filter(Boolean).join(' / ');
     const label = (s) => ({ content: s, styles: { fillColor: LABEL_BG, fontStyle: 'bold', textColor: [60, 70, 85] } });
@@ -172,7 +328,6 @@ const PdfExport = (() => {
 
     // ---------- Blatt 2 ff.: Einträge (Querformat) ----------
     doc.addPage('a4', 'landscape');
-    const lw = doc.internal.pageSize.getWidth();
     y = 22;
     y = sectionTitle(doc, 3, 'Einträge (chronologisch)', y);
     doc.setFontSize(9);
@@ -208,9 +363,7 @@ const PdfExport = (() => {
       body.push(['', '', '', '', '', '', '', '', { content: '', styles: { minCellHeight: 11 } }, '']);
     }
 
-    const origAddPage = doc.addPage;
-    doc.addPage = function () { return origAddPage.call(this, 'a4', 'landscape'); };
-    doc.autoTable({
+    landscapeTable(doc, {
       startY: y,
       margin: { left: M, right: M, top: 18, bottom: 24 },
       theme: 'grid',
@@ -228,48 +381,12 @@ const PdfExport = (() => {
         4: { cellWidth: 23 }, 5: { cellWidth: 22 }, 6: { cellWidth: 38 }, 7: { cellWidth: 38 }, 8: { cellWidth: 38 }, 9: { cellWidth: 26 },
       },
       didDrawCell: (d) => {
-        if (d.section !== 'body' || d.column.index !== 8) return;
-        const sigs = sigRows[d.row.index] || [];
-        const slotH = (d.cell.height - 1) / Math.max(1, sigs.length);
-        sigs.forEach((s, i) => {
-          const maxW = d.cell.width - 3;
-          const maxH = slotH - 4.5;
-          const ratio = Math.min(maxW / s.w, maxH / s.h);
-          const w = s.w * ratio;
-          const h = s.h * ratio;
-          const top = d.cell.y + 0.8 + i * slotH;
-          try { doc.addImage(s.img, 'PNG', d.cell.x + 1.5, top, w, h); } catch (err) { console.warn(err); }
-          doc.setFontSize(5.2);
-          doc.setTextColor(...GREY);
-          const role = s.role === 'kunde' ? 'Betr.' : 'Techn.';
-          let caption = `${role} ${s.name || ''}, ${fmtDate(s.at)}`;
-          while (doc.getTextWidth(caption) > maxW && caption.length > 10) caption = caption.slice(0, -2);
-          doc.text(caption, d.cell.x + 1.5, top + slotH - 1.2);
-          doc.setTextColor(0);
-        });
+        if (d.section === 'body' && d.column.index === 8) drawSignatures(doc, d, sigRows[d.row.index]);
       },
     });
-    doc.addPage = origAddPage;
 
-    let fy = doc.lastAutoTable.finalY + 5;
-    const lh2 = doc.internal.pageSize.getHeight();
-    if (fy > lh2 - 26) {
-      doc.addPage('a4', 'landscape');
-      fy = 22;
-    }
-    doc.setFontSize(7.5);
-    doc.setTextColor(...GREY);
-    doc.text('* Tätigkeit: Installation · Wartung/Instandhaltung · Reparatur · Dichtheitskontrolle · Rückgewinnung · Stilllegung.', M, fy, { maxWidth: lw - 2 * M });
-    doc.setTextColor(0);
-
-    // Kopf/Fuß auf allen Seiten
-    const total = doc.internal.getNumberOfPages();
-    for (let p = 1; p <= total; p++) {
-      doc.setPage(p);
-      header(doc, settings);
-      footer(doc, settings, p, total);
-    }
-    return doc;
+    footnote(doc, '* Tätigkeit: Installation · Wartung/Instandhaltung · Reparatur · Dichtheitskontrolle · Rückgewinnung · Stilllegung.');
+    return finish(doc, settings);
   }
 
   function filename(sysId) {

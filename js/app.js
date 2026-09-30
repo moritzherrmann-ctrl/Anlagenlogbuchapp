@@ -1,4 +1,4 @@
-/* Oberfläche: Kunden → Anlagen → Einträge (Prüfungen) mit digitaler Unterschrift */
+/* Oberfläche: Bereich → Kunden → Standorte → Anlagen → Einträge mit digitaler Unterschrift */
 'use strict';
 
 const main = document.getElementById('main');
@@ -49,14 +49,19 @@ function setActiveNav(key) {
   document.querySelectorAll('.topnav a').forEach((a) => a.classList.toggle('active', a.dataset.nav === key));
 }
 
-function render(html, nav = 'kunden') {
+function render(html, nav = 'kunden', showArea = true) {
   main.innerHTML = html;
   setActiveNav(nav);
+  const area = Areas.get(Areas.current);
+  document.getElementById('brandText').textContent = showArea ? `${area.icon} ${area.short}` : 'Anlagenbuch';
+  document.querySelector('.brand').setAttribute('href', showArea ? '#/b/' + area.key : '#/');
   window.scrollTo(0, 0);
 }
 
+const areaHome = () => '#/b/' + Areas.current;
+
 function notFound() {
-  render(`<div class="empty">Nicht gefunden. <a href="#/">Zur Startseite</a></div>`);
+  render(`<div class="empty">Nicht gefunden. <a href="#/">Zur Startseite</a></div>`, 'kunden', false);
 }
 
 function systemTitle(s) {
@@ -69,7 +74,8 @@ function locationTitle(l) {
 
 /** Brotkrumen: Kunden › Kunde › Standort › Anlage (je nach Tiefe). */
 function crumbs({ c, l, s } = {}) {
-  const parts = ['<a href="#/">Start</a>'];
+  const area = Areas.get(Areas.current);
+  const parts = ['<a href="#/">Start</a>', `<a href="#/b/${area.key}">${esc(area.short)}</a>`];
   if (c) parts.push(`<a href="#/kunde/${c.id}">${esc(c.name)}</a>`);
   if (l) parts.push(`<a href="#/standort/${l.id}">${esc(locationTitle(l))}</a>`);
   if (s) parts.push(`<a href="#/anlage/${s.id}">${esc(systemTitle(s))}</a>`);
@@ -95,11 +101,35 @@ function worstBadge(systems) {
   return `<span class="badge ${st.cls}">${esc(st.text)}</span>`;
 }
 
-// ---------- Startseite: nächste Dichtheitskontrollen, nächste Wartungen, Kunden ----------
+// ---------- Start: Bereichsauswahl ----------
+function viewAreas() {
+  const st = Store.get();
+  render(`
+    <h1>Bereich wählen</h1>
+    <p class="muted">Kunden und Standorte sind in allen Bereichen gleich – die Anlagen gehören jeweils zu einem Bereich.</p>
+    <div class="area-grid">${Areas.keys.map((k) => {
+      const a = Areas.get(k);
+      const systems = st.systems.filter((s) => Areas.of(s) === k);
+      const overdue = systems.flatMap((s) => FGas.dueItems(s, Store.entriesOf(s.id))).filter((d) => d.date && d.date < today()).length;
+      return `<a class="area-tile area-${k}" href="#/b/${k}">
+        <span class="area-icon">${a.icon}</span>
+        <span class="area-title">${esc(a.label)}</span>
+        <span class="area-desc">${esc(a.desc)}</span>
+        <span class="entry-meta"><span class="badge">${systems.length} ${systems.length === 1 ? 'Anlage' : 'Anlagen'}</span>
+          ${overdue ? `<span class="badge danger">${overdue} überfällig</span>` : ''}</span>
+      </a>`;
+    }).join('')}</div>
+    <p class="muted small" style="margin-top:16px">${st.customers.length} Kunden · ${st.locations.length} Standorte</p>
+  `, 'kunden', false);
+}
+
+// ---------- Bereichs-Startseite: nächste Termine + Kunden ----------
 const HOME_LIMIT = 10;
 
 function viewHome(q) {
   const st = Store.get();
+  const area = Areas.get(Areas.current);
+  const inArea = (s) => Areas.of(s) === area.key;
   const term = (q.get('q') || '').toLowerCase();
   const showAll = q.get('alle') || '';
   const customers = [...st.customers]
@@ -122,7 +152,7 @@ function viewHome(q) {
 
   /** Terminliste (Dichtheitskontrollen bzw. Wartungen) mit „Alle anzeigen“ und Anlagen ohne Termin. */
   const dueSection = ({ key, title, calc, emptyText, openText }) => {
-    const due = st.systems.map((s) => ({ s, d: calc(s, Store.entriesOf(s.id)) })).filter((x) => x.d);
+    const due = st.systems.filter(inArea).map((s) => ({ s, d: calc(s, Store.entriesOf(s.id)) })).filter((x) => x.d);
     const dated = due.filter((x) => x.d.date).sort((a, b) => a.d.date.localeCompare(b.d.date));
     const open = due.filter((x) => !x.d.date);
     const all = showAll === key;
@@ -135,7 +165,7 @@ function viewHome(q) {
       ${overdue ? `<div class="notice danger"><strong>${overdue} ${overdue === 1 ? 'Termin ist' : 'Termine sind'} überfällig.</strong></div>` : ''}
       ${dated.length ? `<ul class="list">${shown.map(dueRow).join('')}</ul>
         ${dated.length > HOME_LIMIT ? `<div class="actions" style="margin-top:0">
-          <a class="btn small" href="#/?${toggle}">${all ? 'Weniger anzeigen' : `Alle ${dated.length} Termine anzeigen`}</a></div>` : ''}`
+          <a class="btn small" href="${areaHome()}?${toggle}">${all ? 'Weniger anzeigen' : `Alle ${dated.length} Termine anzeigen`}</a></div>` : ''}`
       : `<div class="empty">${emptyText}</div>`}
       ${open.length ? `<details class="card" style="margin-top:12px"><summary><strong>${open.length} Anlage(n) ohne Termin</strong>
         <span class="muted small"> – ${openText}</span></summary>
@@ -144,19 +174,20 @@ function viewHome(q) {
   };
 
   render(`
-    ${dueSection({
+    <div class="area-head"><span>${area.icon}</span> ${esc(area.label)} <a class="small" href="#/">Bereich wechseln</a></div>
+    ${area.key === 'kaelte' ? dueSection({
       key: 'dk',
       title: 'Nächste Dichtheitskontrollen',
       calc: FGas.nextDue,
       emptyText: 'Keine anstehenden Dichtheitskontrollen. Termine entstehen automatisch für prüfpflichtige Anlagen (ab 5 t CO2-Äquivalent) aus dem Prüfintervall und den Einträgen.',
       openText: 'noch keine Dichtheitskontrolle und kein Errichtungsdatum erfasst',
-    })}
+    }) : ''}
     ${dueSection({
       key: 'wa',
       title: 'Nächste Wartungen',
       calc: FGas.nextMaintenance,
       emptyText: 'Keine anstehenden Wartungen. Termine entstehen aus dem Wartungsintervall der Anlagen und den eingetragenen Wartungen.',
-      openText: 'noch keine Wartung und kein Errichtungsdatum erfasst',
+      openText: 'noch keine Wartung und kein Inbetriebnahme-Datum erfasst',
     })}
 
     <div class="head-row" style="margin-top:24px">
@@ -166,7 +197,7 @@ function viewHome(q) {
     <input class="search" type="search" id="search" placeholder="Kunden oder Standorte suchen …" value="${esc(q.get('q') || '')}">
     ${customers.length ? `<ul class="list">${customers.map((c) => {
       const nl = Store.locationsOf(c.id).length;
-      const ns = Store.systemsOf(c.id).length;
+      const ns = Store.systemsOf(c.id).filter(inArea).length;
       return `<li><a class="list-item" href="#/kunde/${c.id}">
         <div class="grow"><div class="title">${esc(c.name)}</div>
         <div class="sub">${esc(customerAddress(c))}</div>
@@ -180,7 +211,7 @@ function viewHome(q) {
   s.addEventListener('input', () => {
     const qs = new URLSearchParams({ q: s.value });
     if (showAll) qs.set('alle', showAll);
-    history.replaceState(null, '', '#/?' + qs);
+    history.replaceState(null, '', areaHome() + '?' + qs);
     const pos = s.selectionStart;
     viewHome(qs);
     const n = document.getElementById('search');
@@ -212,7 +243,7 @@ function viewCustomerForm(id) {
       <div class="actions">
         ${id ? '<button type="button" class="btn danger" id="del">Kunde löschen</button>' : ''}
         <span class="spacer"></span>
-        <a class="btn ghost" href="${id ? '#/kunde/' + id : '#/'}">Abbrechen</a>
+        <a class="btn ghost" href="${id ? '#/kunde/' + id : areaHome()}">Abbrechen</a>
         <button class="btn primary" type="submit">Speichern</button>
       </div>
     </form>
@@ -238,7 +269,7 @@ function viewCustomerForm(id) {
     if (!confirm(`Kunde „${c.name}“ wirklich löschen?${nl || n ? `\nAuch ${nl} Standort(e) und ${n} Anlage(n) inkl. aller Einträge werden gelöscht!` : ''}`)) return;
     await Store.removeCustomer(id);
     toast('Kunde gelöscht');
-    go('#/');
+    go(areaHome());
   });
 }
 
@@ -268,7 +299,7 @@ function viewCustomer(id) {
       <a class="btn primary" href="#/standort/neu?kunde=${id}">+ Standort anlegen</a>
     </div>
     ${locations.length ? `<ul class="list">${locations.map((l) => {
-      const systems = Store.systemsAt(l.id);
+      const systems = Store.systemsAt(l.id).filter((s) => Areas.of(s) === Areas.current);
       return `<li><a class="list-item" href="#/standort/${l.id}">
         <div class="grow"><div class="title">${esc(locationTitle(l))}</div>
         <div class="sub">${esc(l.name ? customerAddress(l) : '')}</div>
@@ -336,7 +367,13 @@ function viewLocation(id) {
   const l = Store.location(id);
   if (!l) return notFound();
   const c = Store.customer(l.customerId);
-  const systems = Store.systemsAt(id).sort((a, b) => systemTitle(a).localeCompare(systemTitle(b), 'de'));
+  const area = Areas.get(Areas.current);
+  const all = Store.systemsAt(id);
+  const systems = all.filter((s) => Areas.of(s) === area.key).sort((a, b) => systemTitle(a).localeCompare(systemTitle(b), 'de'));
+  const others = Areas.keys.filter((k) => k !== area.key).map((k) => [k, all.filter((s) => Areas.of(s) === k).length]).filter(([, n]) => n);
+  const sub = (s) => (Areas.isKaelte(s)
+    ? [s.typ, s.kaeltemittel, s.fuellmenge ? fmtNum(s.fuellmenge, 3) + ' kg' : '', s.aufstellort]
+    : [s.typ, s.hersteller, s.modell, s.aufstellort]).filter(Boolean).join(' · ');
   render(`
     ${crumbs({ c })}
     <div class="head-row">
@@ -353,16 +390,18 @@ function viewLocation(id) {
       </dl>
     </div>
     <div class="head-row">
-      <h2 style="margin:8px 0 0;flex:1">Anlagen</h2>
-      <a class="btn primary" href="#/anlage/neu?standort=${id}">+ Anlage anlegen</a>
+      <h2 style="margin:8px 0 0;flex:1">${area.icon} ${esc(area.label)}</h2>
+      <a class="btn primary" href="#/anlage/neu?standort=${id}&bereich=${area.key}">+ Anlage anlegen</a>
     </div>
     ${systems.length ? `<ul class="list">${systems.map((s) => `
       <li><a class="list-item" href="#/anlage/${s.id}">
         <div class="grow"><div class="title">${esc(systemTitle(s))}</div>
-        <div class="sub">${esc([s.typ, s.kaeltemittel, s.fuellmenge ? fmtNum(s.fuellmenge, 3) + ' kg' : '', s.aufstellort].filter(Boolean).join(' · '))}</div>
+        <div class="sub">${esc(sub(s))}</div>
         <div class="entry-meta">${dueBadge(s)}</div></div>
         <span class="chev">›</span></a></li>`).join('')}</ul>`
-    : `<div class="empty">An diesem Standort ist noch keine Anlage angelegt.</div>`}
+    : `<div class="empty">An diesem Standort ist noch keine Anlage im Bereich ${esc(area.short)} angelegt.</div>`}
+    ${others.length ? `<p class="small muted" style="margin-top:12px">Weitere Anlagen an diesem Standort: ${others.map(([k, n]) =>
+      `<a href="#/standort/${id}?bereich=${k}">${Areas.get(k).icon} ${n} × ${esc(Areas.get(k).short)}</a>`).join(' · ')}</p>` : ''}
   `);
 }
 
@@ -371,6 +410,8 @@ function viewSystemForm(id, q) {
   const settings = Store.get().settings;
   const s = id ? Store.system(id) : null;
   if (id && !s) return notFound();
+  const areaKey = s ? Areas.of(s) : (q.get('bereich') || Areas.current);
+  if (areaKey !== 'kaelte') return Generic.systemForm(id, q, areaKey);
   const l = Store.location(s ? s.locationId : q.get('standort'));
   if (!l) return notFound();
   const c = Store.customer(l.customerId);
@@ -492,6 +533,7 @@ function viewSystemForm(id, q) {
 function viewSystem(id) {
   const s = Store.system(id);
   if (!s) return notFound();
+  if (!Areas.isKaelte(s)) return Generic.systemView(id);
   const c = Store.customer(s.customerId);
   const l = Store.location(s.locationId);
   const entries = Store.entriesOf(id);
@@ -551,6 +593,10 @@ function viewSystem(id) {
         </div><span class="chev">›</span></a></li>`).join('')}</ul>`
     : `<div class="empty">Noch keine Einträge. Lege die erste Prüfung/Tätigkeit an.</div>`}
   `);
+  bindPdfButtons(id, s);
+}
+
+function bindPdfButtons(id, s) {
   document.getElementById('pdf').addEventListener('click', async () => {
     try {
       await PdfExport.download(id);
@@ -577,6 +623,7 @@ function viewEntryForm(id, q) {
   if (e && (e.sigTechniker || e.sigKunde)) return go('#/eintrag/' + id);
   const s = Store.system(e ? e.systemId : q.get('anlage'));
   if (!s) return notFound();
+  if (!Areas.isKaelte(s)) return Generic.entryForm(id, q);
   const c = Store.customer(s.customerId);
   const v = e || {
     datum: today(),
@@ -689,7 +736,7 @@ function viewEntry(id) {
     ${locked ? '<div class="notice">Dieser Eintrag ist unterschrieben und damit gesperrt. Zum Ändern müssen die Unterschriften zurückgesetzt werden.</div>' : ''}
     <div class="card">
       <dl class="kv">
-        ${row('Datum', fmtDate(e.datum))}
+        ${Areas.isKaelte(s) ? `${row('Datum', fmtDate(e.datum))}
         ${row('Tätigkeit', e.taetigkeit)}
         ${row('Menge zugefügt', fmtNum(e.mengeZugefuegt, 3) && fmtNum(e.mengeZugefuegt, 3) + ' kg')}
         ${row('Menge entnommen', fmtNum(e.mengeEntnommen, 3) && fmtNum(e.mengeEntnommen, 3) + ' kg')}
@@ -699,7 +746,7 @@ function viewEntry(id) {
         ${row('Nachkontrolle am', fmtDate(e.nachkontrolleAm))}
         ${row('Fachbetrieb', e.fachbetrieb)}
         ${row('Techniker', [e.techniker, e.technikerZertNr ? 'Zert.-Nr. ' + e.technikerZertNr : ''].filter(Boolean).join(', '))}
-        ${row('Bemerkung', e.bemerkung)}
+        ${row('Bemerkung', e.bemerkung)}` : Generic.entryRows(e, s)}
       </dl>
     </div>
     <h2>Unterschriften</h2>
@@ -716,7 +763,7 @@ function viewEntry(id) {
     const name = role === 'kunde' ? (c.ansprechpartner || c.name) : (e.techniker || settings.techniker);
     const hint = role === 'kunde'
       ? 'Der Betreiber bestätigt die Durchführung der oben dokumentierten Arbeiten.'
-      : 'Der Techniker bestätigt die Richtigkeit der Angaben (Art. 7 VO (EU) 2024/573).';
+      : `Der Techniker bestätigt die Richtigkeit der Angaben${Areas.isKaelte(s) ? ' (Art. 7 VO (EU) 2024/573)' : ''}.`;
     Signature.open({ title: role === 'kunde' ? 'Unterschrift Betreiber / Kunde' : 'Unterschrift Techniker', hint, name }, async (sig) => {
       const key = role === 'kunde' ? 'sigKunde' : 'sigTechniker';
       await Store.upsert('entries', { id, [key]: { ...sig, role, at: new Date().toISOString() } });
@@ -848,8 +895,13 @@ function router() {
   const q = new URLSearchParams(qs || '');
   const p = path.split('/').filter(Boolean);
   if (Signature && !document.getElementById('sigModal').hidden) document.getElementById('sigCancel').click();
+  if (q.get('bereich')) Areas.setCurrent(q.get('bereich'));
 
-  if (p.length === 0) return viewHome(q);
+  if (p.length === 0) return viewAreas();
+  if (p[0] === 'b') {
+    Areas.setCurrent(p[1]);
+    return viewHome(q);
+  }
   if (p[0] === 'einstellungen') return viewSettings();
   if (p[0] === 'kunde') {
     if (p[1] === 'neu') return viewCustomerForm(null);
@@ -861,12 +913,16 @@ function router() {
     if (p[2] === 'bearbeiten') return viewLocationForm(p[1], q);
     return viewLocation(p[1]);
   }
+  const sysArea = (sysId) => { const x = Store.system(sysId); if (x) Areas.setCurrent(Areas.of(x)); };
   if (p[0] === 'anlage') {
+    if (p[1] !== 'neu') sysArea(p[1]);
     if (p[1] === 'neu') return viewSystemForm(null, q);
     if (p[2] === 'bearbeiten') return viewSystemForm(p[1], q);
     return viewSystem(p[1]);
   }
   if (p[0] === 'eintrag') {
+    const en = Store.entry(p[1]);
+    sysArea(en ? en.systemId : q.get('anlage'));
     if (p[1] === 'neu') return viewEntryForm(null, q);
     if (p[2] === 'bearbeiten') return viewEntryForm(p[1], q);
     return viewEntry(p[1]);

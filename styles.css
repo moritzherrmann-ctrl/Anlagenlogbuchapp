@@ -53,7 +53,7 @@ a { color: var(--primary); }
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--text); text-decoration: none; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--text); text-decoration: none; white-space: nowrap; }
 .topnav { margin-left: auto; display: flex; gap: 4px; }
 .topnav a { padding: 6px 10px; border-radius: 8px; text-decoration: none; color: var(--muted); font-weight: 500; }
 .topnav a.active { background: var(--surface-2); color: var(--text); }
@@ -190,3 +190,26 @@ legend { font-weight: 700; padding: 0 6px; }
 .date-chip.warn strong { color: var(--warn); }
 .date-chip.ok strong { color: var(--ok); }
 details summary { cursor: pointer; }
+
+/* Bereiche */
+.area-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 720px) { .area-grid { grid-template-columns: minmax(0, 1fr); } }
+.area-tile {
+  display: flex; flex-direction: column; gap: 6px; padding: 18px;
+  background: var(--surface); border: 1px solid var(--border); border-left: 6px solid var(--area, var(--primary));
+  border-radius: var(--radius); box-shadow: var(--shadow); text-decoration: none; color: var(--text);
+}
+.area-tile:hover { border-color: var(--area, var(--primary)); }
+.area-icon { font-size: 2rem; line-height: 1; }
+.area-title { font-size: 1.15rem; font-weight: 700; }
+.area-desc { color: var(--muted); font-size: .9rem; }
+.area-kaelte { --area: #0b5cab; }
+.area-heizung { --area: #c2410c; }
+.area-trinkwasser { --area: #0891b2; }
+.area-head { display: flex; align-items: baseline; gap: 8px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+.area-head a { margin-left: auto; font-weight: 500; }
+.checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+@media (max-width: 640px) { .checks { grid-template-columns: minmax(0, 1fr); } }
+.checks .check { min-height: 36px; }
+ul.plain { list-style: none; margin: 0; padding: 0; }
+.spec[hidden] { display: none; }

@@ -325,6 +325,7 @@ const FGas = (() => {
 
   /** Nächste fällige Dichtheitskontrolle bzw. Nachkontrolle. */
   function nextDue(sys, entries) {
+    if (!Areas.isKaelte(sys)) return null; // Dichtheitskontrollen nur bei Kälteanlagen
     const m = interval(sys);
     const checks = entries.filter((e) => e.datum && (e.ergebnis === 'dicht' || e.ergebnis === 'Leckage'));
     const last = checks[checks.length - 1];
@@ -348,7 +349,9 @@ const FGas = (() => {
   function nextMaintenance(sys, entries) {
     const m = maintInterval(sys);
     if (!m) return null;
-    const done = entries.filter((e) => e.datum && (e.taetigkeit === 'Wartung/Instandhaltung' || e.taetigkeit === 'Installation'));
+    const area = Areas.get(Areas.of(sys));
+    const acts = area.maintActs || ['Wartung/Instandhaltung', 'Installation'];
+    const done = entries.filter((e) => e.datum && acts.includes(e.taetigkeit));
     const last = done[done.length - 1];
     const base = last ? last.datum : sys.errichtetAm;
     if (!base) return { date: null, reason: 'Wartung', kind: 'wartung' };
