@@ -3,10 +3,12 @@
 # (Alias „anlagenbuch“). Ohne Secrets entsteht nur eine Test-APK als Workflow-Artefakt.
 name: Android-APK
 
+# Vorerst abgeschaltet: kein automatischer Bau bei Push, nur manuell über „Run workflow“.
+# Zum Reaktivieren den push-Block wieder einkommentieren.
 on:
-  push:
-    branches: [claude/klimaanlagen-logbuch-app-a5aejy]
-    paths-ignore: ['README.md']
+  # push:
+  #   branches: [claude/klimaanlagen-logbuch-app-a5aejy]
+  #   paths-ignore: ['README.md']
   workflow_dispatch:
 
 permissions:

@@ -54,8 +54,8 @@ die Aufzeichnungen müssen mindestens 5 Jahre aufbewahrt werden.
 ## Android-App (APK)
 
 Die Web-App wird mit [Capacitor](https://capacitorjs.com) in eine Android-App verpackt.
-Gebaut wird automatisch per GitHub Actions (`.github/workflows/android.yml`) bei jedem Push
-oder manuell über *Actions → Android-APK → Run workflow*.
+Gebaut wird per GitHub Actions (`.github/workflows/android.yml`). **Der automatische Bau ist
+vorerst abgeschaltet** – nur manuell über *Actions → Android-APK → Run workflow*.
 
 - **Download der aktuellen Version:**
   https://github.com/moritzherrmann-ctrl/Anlagenlogbuchapp/releases/latest/download/Anlagenbuch.apk
