@@ -416,7 +416,7 @@ function viewSystemForm(id, q) {
   if (!l) return notFound();
   const c = Store.customer(l.customerId);
   if (!c) return notFound();
-  const autoNr = Store.nextSystemNumber(c.id);
+  const autoNr = Store.nextSystemNumber(c.id, 'kaelte');
   const locOptions = Store.locationsOf(c.id).map((x) => [x.id, locationTitle(x) + (x.name && customerAddress(x) ? ' – ' + customerAddress(x) : '')]);
   const v = s || {
     locationId: l.id,
@@ -435,7 +435,7 @@ function viewSystemForm(id, q) {
         <div class="grid">
           ${field('anlagenNr', 'Anlagen-Nr.', v.anlagenNr || autoNr, {
             hint: autoNr
-              ? (v.anlagenNr ? '' : 'automatisch vergeben (Kundennummer + laufende Nummer)')
+              ? (v.anlagenNr ? '' : 'automatisch vergeben (Kundennummer + laufende Nummer + K)')
               : `Für automatische Nummern beim Kunden eine <a href="#/kunde/${c.id}/bearbeiten">Kunden-Nr.</a> eintragen.`,
           })}
           ${field('bezeichnung', 'Bezeichnung', v.bezeichnung, { required: true, hint: 'z. B. „Klima Büro EG“' })}
@@ -514,7 +514,7 @@ function viewSystemForm(id, q) {
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const d = formData(f);
-    Store.noteSystemNumber(c.id, d.anlagenNr);
+    Store.noteSystemNumber(c.id, d.anlagenNr, 'kaelte');
     const saved = await Store.upsert('systems', { ...d, id: id || undefined, customerId: c.id });
     toast('Anlage gespeichert');
     go('#/anlage/' + saved.id);

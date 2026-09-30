@@ -23,7 +23,8 @@ mit Unterschrift und eine eigene PDF-Ausgabe.
   Nachkontrollen der prüfpflichtigen Anlagen, nach Datum sortiert, überfällige rot markiert
 - **Startseite: nächste Wartungen** – nach Wartungsintervall der Anlagen, nach Datum sortiert
 - **Kunden** (Betreiber) anlegen, bearbeiten, suchen
-- **Automatische Anlagen-Nr.**: Kunden-Nr. + laufende Nummer (z. B. `10023-0001`, `10023-0002`, …);
+- **Automatische Anlagen-Nr. je Bereich**: Kunden-Nr. + laufende Nummer + Kürzel –
+  Kälte `10023-0001K`, Heizung `10023-0001HZ`, Trinkwasser `10023-0001TW`;
   Nummern gelöschter Anlagen werden nicht erneut vergeben
 - **Standorte** je Kunde (z. B. Filialen, Lager) mit eigener Anschrift und Ansprechpartner
 - **Anlagen** je Standort anlegen – alle Stammdaten der Vorlage:

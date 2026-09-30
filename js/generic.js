@@ -37,7 +37,7 @@ const Generic = (() => {
     const l = Store.location(s ? s.locationId : q.get('standort'));
     if (!l) return notFound();
     const c = Store.customer(l.customerId);
-    const autoNr = Store.nextSystemNumber(c.id);
+    const autoNr = Store.nextSystemNumber(c.id, area.key);
     const locOptions = Store.locationsOf(c.id).map((x) => [x.id, locationTitle(x) + (x.name && customerAddress(x) ? ' – ' + customerAddress(x) : '')]);
     const v = s || {
       locationId: l.id,
@@ -53,7 +53,7 @@ const Generic = (() => {
           <div class="grid">
             ${field('anlagenNr', 'Anlagen-Nr.', v.anlagenNr || autoNr, {
               hint: autoNr
-                ? (v.anlagenNr ? '' : 'automatisch vergeben (Kundennummer + laufende Nummer)')
+                ? (v.anlagenNr ? '' : `automatisch vergeben (Kundennummer + laufende Nummer + ${area.suffix})`)
                 : `Für automatische Nummern beim Kunden eine <a href="#/kunde/${c.id}/bearbeiten">Kunden-Nr.</a> eintragen.`,
             })}
             ${field('bezeichnung', 'Bezeichnung', v.bezeichnung, { required: true, hint: area.key === 'heizung' ? 'z. B. „Gaskessel Keller“' : 'z. B. „Hauswasserstation HWR“' })}
@@ -101,7 +101,7 @@ const Generic = (() => {
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       const d = formData(f);
-      Store.noteSystemNumber(c.id, d.anlagenNr);
+      Store.noteSystemNumber(c.id, d.anlagenNr, area.key);
       const saved = await Store.upsert('systems', { ...d, id: id || undefined, customerId: c.id, bereich: area.key });
       toast('Anlage gespeichert');
       go('#/anlage/' + saved.id);

@@ -15,6 +15,7 @@ const Areas = (() => {
 
   const heizung = {
     key: 'heizung',
+    suffix: 'HZ',
     label: 'Heizungsanlagen',
     short: 'Heizung',
     icon: '🔥',
@@ -111,6 +112,7 @@ const Areas = (() => {
 
   const trinkwasser = {
     key: 'trinkwasser',
+    suffix: 'TW',
     label: 'Trinkwasseranlagen',
     short: 'Trinkwasser',
     icon: '💧',
@@ -168,6 +170,7 @@ const Areas = (() => {
 
   const kaelte = {
     key: 'kaelte',
+    suffix: 'K',
     label: 'Kälteanlagen',
     short: 'Kälte',
     icon: '❄️',

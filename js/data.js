@@ -54,6 +54,7 @@ const Store = (() => {
       locations: Array.isArray(s.locations) ? s.locations : [],
       systems: Array.isArray(s.systems) ? s.systems : [],
       entries: Array.isArray(s.entries) ? s.entries : [],
+      nummernJeBereich: !!s.nummernJeBereich,
     });
   }
 
@@ -61,6 +62,7 @@ const Store = (() => {
   function migrate(s) {
     const now = new Date().toISOString();
     for (const sys of s.systems) FGas.fixGwp(sys);
+    renumberPerArea(s);
     for (const sys of s.systems) {
       if (sys.locationId && s.locations.some((l) => l.id === sys.locationId)) continue;
       const cust = s.customers.find((c) => c.id === sys.customerId) || {};
@@ -124,31 +126,64 @@ const Store = (() => {
     .filter((e) => e.systemId === systemId)
     .sort((a, b) => (a.datum || '').localeCompare(b.datum || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
 
-  // --- Anlagen-Nummern: <Kundennummer>-0001, -0002, … ---
-  function numberSuffix(nr, prefix) {
-    const m = String(nr || '').match(/^(.*)-(\d+)$/);
-    return m && m[1] === prefix ? Number(m[2]) : 0;
+  // --- Anlagen-Nummern je Bereich: <Kundennummer>-0001K / -0001HZ / -0001TW ---
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  function numberOf(nr, prefix, suffix) {
+    const m = String(nr || '').match(new RegExp(`^${esc(prefix)}-(\\d+)${esc(suffix)}$`));
+    return m ? Number(m[1]) : 0;
   }
 
-  /** Nächste freie Anlagen-Nr. des Kunden ('' wenn keine Kundennummer hinterlegt). */
-  function nextSystemNumber(customerId) {
+  const format = (prefix, n, suffix) => `${prefix}-${String(n).padStart(4, '0')}${suffix}`;
+
+  /** Gemerkter Zähler des Kunden für einen Bereich (gilt nur für die aktuelle Kundennummer). */
+  function counterOf(c, prefix, area) {
+    const z = c.anlagenZaehler;
+    return z && typeof z === 'object' && z.prefix === prefix ? Number(z[area]) || 0 : 0;
+  }
+
+  /** Nächste freie Anlagen-Nr. des Kunden im Bereich ('' wenn keine Kundennummer hinterlegt). */
+  function nextSystemNumber(customerId, area) {
     const c = customer(customerId);
     const prefix = c && (c.kundennr || '').trim();
     if (!prefix) return '';
-    const used = systemsOf(customerId).map((x) => numberSuffix(x.anlagenNr, prefix));
-    const counter = c.anlagenZaehlerPrefix === prefix ? Number(c.anlagenZaehler) || 0 : 0;
-    const next = Math.max(counter, ...used) + 1;
-    return `${prefix}-${String(next).padStart(4, '0')}`;
+    const suffix = Areas.get(area).suffix;
+    const used = systemsOf(customerId).filter((x) => Areas.of(x) === area).map((x) => numberOf(x.anlagenNr, prefix, suffix));
+    return format(prefix, Math.max(counterOf(c, prefix, area), ...used) + 1, suffix);
   }
 
   /** Zähler merken, damit Nummern gelöschter Anlagen nicht erneut vergeben werden. */
-  function noteSystemNumber(customerId, nr) {
+  function noteSystemNumber(customerId, nr, area) {
     const c = customer(customerId);
     const prefix = c && (c.kundennr || '').trim();
-    const n = prefix ? numberSuffix(nr, prefix) : 0;
-    if (!n) return;
-    const counter = c.anlagenZaehlerPrefix === prefix ? Number(c.anlagenZaehler) || 0 : 0;
-    if (n > counter) Object.assign(c, { anlagenZaehler: n, anlagenZaehlerPrefix: prefix });
+    if (!prefix) return;
+    const n = numberOf(nr, prefix, Areas.get(area).suffix);
+    if (n <= counterOf(c, prefix, area)) return;
+    const z = c.anlagenZaehler && typeof c.anlagenZaehler === 'object' && c.anlagenZaehler.prefix === prefix ? c.anlagenZaehler : { prefix };
+    c.anlagenZaehler = { ...z, [area]: n };
+    delete c.anlagenZaehlerPrefix;
+  }
+
+  /** Einmalige Umstellung: bisherige Nummern <Kd-Nr>-0001 (bereichsübergreifend) je Bereich neu durchnummerieren. */
+  function renumberPerArea(st) {
+    if (st.nummernJeBereich) return;
+    for (const c of st.customers) {
+      const prefix = (c.kundennr || '').trim();
+      delete c.anlagenZaehler;
+      delete c.anlagenZaehlerPrefix;
+      if (!prefix) continue;
+      const counters = { prefix };
+      const old = st.systems
+        .filter((x) => x.customerId === c.id && new RegExp(`^${esc(prefix)}-\\d+$`).test(x.anlagenNr || ''))
+        .sort((a, b) => a.anlagenNr.localeCompare(b.anlagenNr));
+      for (const sys of old) {
+        const area = Areas.of(sys);
+        counters[area] = (counters[area] || 0) + 1;
+        sys.anlagenNr = format(prefix, counters[area], Areas.get(area).suffix);
+      }
+      c.anlagenZaehler = counters;
+    }
+    st.nummernJeBereich = true;
   }
 
   function upsert(list, obj) {
