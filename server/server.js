@@ -24,6 +24,7 @@ const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const COLLECTIONS = ['customers', 'locations', 'systems', 'entries', 'settings'];
 const SESSION_DAYS = 90;
+const VALID_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/;
 const MAX_BODY = 25 * 1024 * 1024;
 // Nur diese Dateien/Ordner der App werden ausgeliefert
 const PUBLIC = ['index.html', 'styles.css', 'manifest.webmanifest', 'sw.js', 'js/', 'vendor/', 'icons/'];
@@ -88,9 +89,12 @@ function createUser({ username, password, name, role = 'techniker', zertNr = '' 
   return user;
 }
 
+const tokenHash = (token) => crypto.createHash('sha256').update(token).digest('hex');
+const bearer = (req) => (String(req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/) || [])[1];
+
 function newSession(user) {
   const token = crypto.randomBytes(32).toString('hex');
-  db.sessions[token] = { userId: user.id, created: Date.now() };
+  db.sessions[tokenHash(token)] = { userId: user.id, created: Date.now() };
   // abgelaufene Sitzungen aufräumen
   const limit = Date.now() - SESSION_DAYS * 864e5;
   for (const [t, s] of Object.entries(db.sessions)) if (s.created < limit) delete db.sessions[t];
@@ -98,23 +102,31 @@ function newSession(user) {
   return token;
 }
 
+/** Alle Sitzungen eines Benutzers beenden (außer optional der aktuellen). */
+function dropSessions(userId, keepToken) {
+  const keep = keepToken ? tokenHash(keepToken) : null;
+  for (const [h, s] of Object.entries(db.sessions)) if (s.userId === userId && h !== keep) delete db.sessions[h];
+}
+
 function authUser(req) {
-  const m = String(req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/);
-  const s = m && db.sessions[m[1]];
+  const token = bearer(req);
+  const s = token && db.sessions[tokenHash(token)];
   if (!s || s.created < Date.now() - SESSION_DAYS * 864e5) return null;
   const u = db.users.find((x) => x.id === s.userId);
   return u && u.active !== false ? u : null;
 }
 
-// Schutz gegen Passwort-Raten: max. 10 Fehlversuche je IP in 15 Minuten
+// Schutz gegen Passwort-Raten: max. 10 Fehlversuche je Adresse und Benutzer in 15 Minuten
 const failed = new Map();
-function tooManyFailures(ip) {
-  const f = failed.get(ip);
+function tooManyFailures(key) {
+  const f = failed.get(key);
   return f && f.count >= 10 && Date.now() - f.first < 15 * 60e3;
 }
-function noteFailure(ip) {
-  const f = failed.get(ip);
-  if (!f || Date.now() - f.first > 15 * 60e3) failed.set(ip, { count: 1, first: Date.now() });
+function noteFailure(key) {
+  const now = Date.now();
+  for (const [k, f] of failed) if (now - f.first > 15 * 60e3) failed.delete(k); // abgelaufene Einträge aufräumen
+  const f = failed.get(key);
+  if (!f) failed.set(key, { count: 1, first: now });
   else f.count++;
 }
 
@@ -172,14 +184,17 @@ async function api(req, res, url) {
   }
 
   if (route === 'POST /api/login') {
-    if (tooManyFailures(ip)) throw httpError(429, 'Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.');
     const { username, password } = await readJson(req);
+    // Je Adresse UND Benutzername zählen: hinter einem Reverse-Proxy (Caddy) haben alle Anfragen dieselbe IP,
+    // sonst würden 10 Fehlversuche eines Einzelnen alle Benutzer aussperren.
+    const failKey = `${ip}|${normUser(username)}`;
+    if (tooManyFailures(failKey)) throw httpError(429, 'Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.');
     const user = db.users.find((u) => u.username === normUser(username));
     if (!user || user.active === false || !checkPassword(password, user.password)) {
-      noteFailure(ip);
+      noteFailure(failKey);
       throw httpError(401, 'Benutzername oder Passwort falsch.');
     }
-    failed.delete(ip);
+    failed.delete(failKey);
     return send(res, 200, { token: newSession(user), user: publicUser(user) });
   }
 
@@ -189,8 +204,7 @@ async function api(req, res, url) {
   if (route === 'GET /api/me') return send(res, 200, { user: publicUser(me) });
 
   if (route === 'POST /api/logout') {
-    const token = String(req.headers.authorization).slice(7);
-    delete db.sessions[token];
+    delete db.sessions[tokenHash(bearer(req))];
     saveDb();
     return send(res, 200, { ok: true });
   }
@@ -200,6 +214,7 @@ async function api(req, res, url) {
     if (!checkPassword(oldPassword, me.password)) throw httpError(400, 'Bisheriges Passwort ist falsch.');
     if (String(newPassword || '').length < 8) throw httpError(400, 'Neues Passwort muss mindestens 8 Zeichen haben.');
     me.password = hashPassword(newPassword);
+    dropSessions(me.id, bearer(req)); // andere Geräte müssen sich neu anmelden
     saveDb();
     return send(res, 200, { ok: true });
   }
@@ -219,9 +234,10 @@ async function api(req, res, url) {
     const { changes } = await readJson(req);
     if (!Array.isArray(changes)) throw httpError(400, 'changes fehlt.');
     let accepted = 0;
-    for (const { coll, rec } of changes) {
-      if (!COLLECTIONS.includes(coll) || !rec || typeof rec.id !== 'string') continue;
-      const cur = db.records[coll][rec.id];
+    for (const ch of changes) {
+      const { coll, rec } = ch && typeof ch === 'object' ? ch : {};
+      if (!COLLECTIONS.includes(coll) || !rec || typeof rec !== 'object' || !VALID_ID.test(rec.id)) continue;
+      const cur = Object.hasOwn(db.records[coll], rec.id) ? db.records[coll][rec.id] : null;
       // Neuere Änderung gewinnt (Zeitstempel des Geräts)
       if (cur && String(cur.updatedAt || '') > String(rec.updatedAt || '')) continue;
       db.records[coll][rec.id] = { ...rec, _rev: ++db.seq, _by: me.name };
@@ -241,9 +257,10 @@ async function api(req, res, url) {
     if (!user) throw httpError(404, 'Benutzer nicht gefunden.');
     if (req.method === 'PUT') {
       const body = await readJson(req);
-      const admins = db.users.filter((u) => u.role === 'admin' && u.active !== false);
-      const losesAdmin = user.role === 'admin' && (body.role === 'techniker' || body.active === false);
-      if (losesAdmin && admins.length <= 1) throw httpError(400, 'Es muss mindestens ein aktiver Administrator bleiben.');
+      const activeAdmins = db.users.filter((u) => u.role === 'admin' && u.active !== false);
+      const isActiveAdmin = user.role === 'admin' && user.active !== false;
+      const losesAdmin = isActiveAdmin && (body.role === 'techniker' || body.active === false);
+      if (losesAdmin && activeAdmins.length <= 1) throw httpError(400, 'Es muss mindestens ein aktiver Administrator bleiben.');
       if (body.name !== undefined) user.name = String(body.name).trim() || user.username;
       if (body.zertNr !== undefined) user.zertNr = String(body.zertNr).trim();
       if (body.role !== undefined) user.role = body.role === 'admin' ? 'admin' : 'techniker';
@@ -252,9 +269,7 @@ async function api(req, res, url) {
         if (String(body.password).length < 8) throw httpError(400, 'Passwort muss mindestens 8 Zeichen haben.');
         user.password = hashPassword(body.password);
       }
-      if (user.active === false || body.password) {
-        for (const [t, s] of Object.entries(db.sessions)) if (s.userId === user.id && t !== String(req.headers.authorization).slice(7)) delete db.sessions[t];
-      }
+      if (user.active === false || body.password) dropSessions(user.id, bearer(req));
       saveDb();
       return send(res, 200, { user: publicUser(user) });
     }
@@ -271,9 +286,11 @@ const MIME = {
 };
 
 function serveStatic(req, res, url) {
-  let rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
-  if (rel === '') rel = 'index.html';
-  const file = path.resolve(APP_DIR, rel);
+  let decoded;
+  try { decoded = decodeURIComponent(url.pathname); } catch { throw httpError(400, 'Ungültige Adresse.'); }
+  const file = path.resolve(APP_DIR, decoded.replace(/^\/+/, '') || 'index.html');
+  // Prüfung auf dem normalisierten Pfad, damit z. B. /js%2f..%2fserver%2fdata%2fdb.json nicht durchrutscht
+  const rel = path.relative(APP_DIR, file).split(path.sep).join('/');
   const allowed = file.startsWith(APP_DIR + path.sep) && PUBLIC.some((p) => (p.endsWith('/') ? rel.startsWith(p) : rel === p));
   if (!allowed || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -296,6 +313,9 @@ if (!db.users.length && process.env.ADMIN_USER && process.env.ADMIN_PASSWORD) {
 const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    + "img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
   cors(req, res);
   const url = new URL(req.url, 'http://localhost');
   try {

@@ -114,8 +114,11 @@ const Store = (() => {
   const COLLS = ['customers', 'locations', 'systems', 'entries'];
   const SETTINGS_ID = 'firma';
 
+  let rev = 0; // steigt bei jeder Datenänderung (macht den Eintrags-Index ungültig)
+
   function markDirty(coll, id) {
     state.pending[`${coll}:${id}`] = Date.now();
+    rev++;
   }
 
   function markAllDirty() {
@@ -137,14 +140,19 @@ const Store = (() => {
     return save();
   }
 
+  // Diese Vorgaben gelten je Gerät und werden nicht mit anderen Benutzern abgeglichen
+  const LOCAL_SETTINGS = ['techniker', 'technikerZertNr', '_by'];
+  const withoutLocal = (obj) => Object.fromEntries(Object.entries(obj).filter(([k]) => !LOCAL_SETTINGS.includes(k)));
+
   /** Ausstehende Änderungen für den Upload. */
   function pendingChanges() {
-    const now = new Date().toISOString();
     return Object.entries(state.pending).map(([key, mark]) => {
       const [coll, id] = key.split(/:(.*)/s);
-      if (coll === 'settings') return { key, mark, coll, rec: { ...state.settings, id: SETTINGS_ID } };
+      if (coll === 'settings') return { key, mark, coll, rec: { ...withoutLocal(state.settings), id: SETTINGS_ID } };
       const rec = (state[coll] || []).find((x) => x.id === id);
-      return { key, mark, coll, rec: rec || { id, deleted: true, updatedAt: now } };
+      // Löschung mit dem Zeitpunkt der Löschung (nicht des Uploads) melden, sonst überschreibt
+      // eine offline gemachte Löschung spätere Änderungen anderer Geräte.
+      return { key, mark, coll, rec: rec || { id, deleted: true, updatedAt: new Date(mark).toISOString() } };
     });
   }
 
@@ -162,14 +170,15 @@ const Store = (() => {
       if (coll === 'settings') {
         if (state.pending[`settings:${SETTINGS_ID}`] && String(state.settings.updatedAt || '') > String(data.updatedAt || '')) continue;
         delete data.id;
-        state.settings = { ...state.settings, ...data };
+        state.settings = { ...state.settings, ...withoutLocal(data) };
         changed = true;
         continue;
       }
       if (!COLLS.includes(coll)) continue;
       const list = state[coll];
       const i = list.findIndex((x) => x.id === data.id);
-      if (state.pending[`${coll}:${data.id}`] && i >= 0 && String(list[i].updatedAt || '') > String(data.updatedAt || '')) continue;
+      // Lokal noch nicht hochgeladene Löschung (i < 0) oder neuere lokale Änderung behalten
+      if (state.pending[`${coll}:${data.id}`] && (i < 0 || String(list[i].updatedAt || '') > String(data.updatedAt || ''))) continue;
       if (data.deleted) {
         if (i >= 0) { list.splice(i, 1); changed = true; }
       } else if (i >= 0) {
@@ -181,6 +190,7 @@ const Store = (() => {
       }
     }
     state.syncSeq = seq;
+    if (changed) rev++;
     return save({ silent: true }).then(() => changed);
   }
 
@@ -207,6 +217,27 @@ const Store = (() => {
     return save();
   }
 
+  /** Server-Betrieb: fehlende Datensätze aus einer Sicherung wiederherstellen, vorhandene bleiben unverändert. */
+  function restoreMissing(s) {
+    const src = normalize(s);
+    const now = new Date().toISOString();
+    // Bei alten Sicherungen ohne Standorte legt die Umstellung neue Standorte an – diese nur übernehmen,
+    // wenn eine wiederhergestellte Anlage sie braucht (sonst entstünden leere doppelte Standorte).
+    const origLocations = new Set((Array.isArray(s.locations) ? s.locations : []).map((l) => l.id));
+    const neededLocations = new Set(src.systems.filter((x) => !system(x.id)).map((x) => x.locationId));
+    let restored = 0;
+    for (const coll of COLLS) {
+      for (const r of src[coll]) {
+        if (state[coll].some((x) => x.id === r.id)) continue;
+        if (coll === 'locations' && !origLocations.has(r.id) && !neededLocations.has(r.id)) continue;
+        state[coll].push({ ...r, updatedAt: now });
+        markDirty(coll, r.id);
+        restored++;
+      }
+    }
+    return save().then(() => restored);
+  }
+
   // --- Kunden ---
   const customer = (id) => state.customers.find((c) => c.id === id);
   const systemsOf = (customerId) => state.systems.filter((s) => s.customerId === customerId);
@@ -217,9 +248,21 @@ const Store = (() => {
   const systemsAt = (locationId) => state.systems.filter((s) => s.locationId === locationId);
   const system = (id) => state.systems.find((s) => s.id === id);
   const entry = (id) => state.entries.find((e) => e.id === id);
-  const entriesOf = (systemId) => state.entries
-    .filter((e) => e.systemId === systemId)
-    .sort((a, b) => (a.datum || '').localeCompare(b.datum || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
+  let entryIndex = null;
+  /** Einträge einer Anlage, chronologisch (Index wird nach jeder Änderung neu aufgebaut). */
+  function entriesOf(systemId) {
+    if (!entryIndex || entryIndex.state !== state || entryIndex.rev !== rev) {
+      const map = new Map();
+      for (const e of state.entries) {
+        const list = map.get(e.systemId);
+        if (list) list.push(e); else map.set(e.systemId, [e]);
+      }
+      const order = (a, b) => (a.datum || '').localeCompare(b.datum || '') || (a.createdAt || '').localeCompare(b.createdAt || '');
+      for (const list of map.values()) list.sort(order);
+      entryIndex = { state, rev, map };
+    }
+    return (entryIndex.map.get(systemId) || []).slice();
+  }
 
   // --- Anlagen-Nummern je Bereich: <Kundennummer>-0001K / -0001HZ / -0001TW ---
   const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -330,7 +373,7 @@ const Store = (() => {
   }
 
   return {
-    load, save, get, replace, uid, onChange, touch, saveSettings, markAllDirty, pendingChanges, clearPending, applyRemote, resetForServer, customer, location, locationsOf, system, entry, systemsOf, systemsAt, entriesOf,
+    load, save, get, replace, restoreMissing, uid, onChange, touch, saveSettings, markAllDirty, pendingChanges, clearPending, applyRemote, resetForServer, customer, location, locationsOf, system, entry, systemsOf, systemsAt, entriesOf,
     upsert, nextSystemNumber, noteSystemNumber, removeCustomer, removeLocation, removeSystem, removeEntry, DEFAULT_SETTINGS,
   };
 })();
@@ -506,8 +549,8 @@ const FGas = (() => {
 
   function dueStatus(due) {
     if (!due) return { cls: '', text: 'keine Prüfpflicht' };
-    if (!due.date) return { cls: 'warn', text: 'Prüfung offen' };
-    const today = new Date().toISOString().slice(0, 10);
+    if (!due.date) return { cls: 'warn', text: 'Termin offen' };
+    const today = todayISO();
     if (due.date < today) return { cls: 'danger', text: 'überfällig seit ' + fmtDate(due.date) };
     if (due.date <= addMonths(today, 1)) return { cls: 'warn', text: 'fällig ' + fmtDate(due.date) };
     return { cls: 'ok', text: 'fällig ' + fmtDate(due.date) };
@@ -520,9 +563,13 @@ const FGas = (() => {
 })();
 
 function fmtDate(iso) {
-  if (!iso) return '';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return `${d}.${m}.${y}`;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : '';
+}
+
+/** Heutiges Datum (Ortszeit) als JJJJ-MM-TT. */
+function todayISO(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function fmtDateTime(iso) {

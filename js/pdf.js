@@ -397,7 +397,7 @@ const PdfExport = (() => {
       .replace(/[äöüÄÖÜß]/g, (c) => uml[c])
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^A-Za-z0-9\-_]+/g, '_').replace(/^_+|_+$/g, '');
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayISO();
     return `Anlagenbuch_${[safe(cust && cust.name), safe(sys.anlagenNr || sys.bezeichnung)].filter(Boolean).join('_')}_${today}.pdf`;
   }
 

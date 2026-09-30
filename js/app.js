@@ -5,7 +5,7 @@ const main = document.getElementById('main');
 
 // ---------- Hilfsfunktionen ----------
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayISO();
 const go = (hash) => { location.hash = hash; };
 
 function toast(msg) {
@@ -688,6 +688,11 @@ function viewEntryForm(id, q) {
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const d = formData(f);
+    if (d.taetigkeit === 'Dichtheitskontrolle' && !d.ergebnis) {
+      alert('Bitte das Ergebnis der Dichtheitskontrolle angeben (dicht / Leckage) – sonst zählt sie nicht für die nächste Fälligkeit.');
+      f.ergebnis.focus();
+      return;
+    }
     if (FGas.num(d.mengeZugefuegt) > 0 && !d.herkunft) {
       alert('Bitte die Herkunft des zugefügten Kältemittels angeben (neu / recycelt / aufgearbeitet).');
       f.herkunft.focus();
@@ -713,7 +718,7 @@ function sigBox(e, role) {
   const title = role === 'kunde' ? 'Unterschrift Betreiber / Kunde' : 'Unterschrift Techniker';
   return `<div class="sig-box">
     <h3>${title}${role === 'kunde' ? ' <span class="muted small">(optional)</span>' : ''}</h3>
-    ${sig ? `<img src="${sig.img}" alt="${title}">
+    ${sig ? `<img src="${/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(sig.img || '') ? sig.img : ''}" alt="${title}">
       <div class="small" style="margin-top:6px">${esc(sig.name)} · ${esc(fmtDateTime(sig.at))}</div>`
     : `<div class="none">noch nicht unterschrieben</div>
       <div class="actions" style="margin-top:10px"><button class="btn primary" data-sign="${role}">Jetzt unterschreiben</button></div>`}
@@ -1084,9 +1089,17 @@ function viewSettings() {
     try {
       const data = JSON.parse(await file.text());
       if (!data || !Array.isArray(data.customers) || !Array.isArray(data.systems) || !Array.isArray(data.entries)) throw new Error('Keine gültige Sicherungsdatei.');
-      if (!confirm(`Sicherung mit ${data.customers.length} Kunden, ${data.systems.length} Anlagen und ${data.entries.length} Einträgen laden?\nDie aktuellen Daten auf diesem Gerät werden dabei ERSETZT.`)) return;
-      await Store.replace(data);
-      toast('Sicherung importiert');
+      const summary = `${data.customers.length} Kunden, ${data.systems.length} Anlagen und ${data.entries.length} Einträgen`;
+      if (Sync.loggedIn) {
+        // Server-Betrieb: nichts überschreiben oder löschen, nur fehlende Datensätze wiederherstellen
+        if (!confirm(`Sicherung mit ${summary} einlesen?\nFehlende Datensätze werden wiederhergestellt und hochgeladen. Vorhandene Daten bleiben unverändert.`)) return;
+        const n = await Store.restoreMissing(data);
+        toast(n ? `${n} Datensätze wiederhergestellt` : 'Keine fehlenden Datensätze gefunden');
+      } else {
+        if (!confirm(`Sicherung mit ${summary} laden?\nDie aktuellen Daten auf diesem Gerät werden dabei ERSETZT.`)) return;
+        await Store.replace(data);
+        toast('Sicherung importiert');
+      }
       viewSettings();
     } catch (err) {
       alert('Import fehlgeschlagen: ' + err.message);
@@ -1145,12 +1158,21 @@ function router() {
   await Sync.init();
   Sync.onStatus(() => {
     updateSyncBadge();
-    if (location.hash.startsWith('#/einstellungen') && document.getElementById('serverCard') && !document.activeElement.closest('form')) viewSettings();
+    // Nur den Server-Abschnitt neu zeichnen, damit ungespeicherte Eingaben in den übrigen Einstellungen erhalten bleiben
+    const card = document.getElementById('serverCard');
+    if (location.hash.startsWith('#/einstellungen') && card && !card.contains(document.activeElement)) {
+      card.outerHTML = serverSection();
+      bindServerSection();
+    }
   });
   // Neue Daten vom Server: aktuelle Ansicht neu zeichnen (nicht während einer Eingabe)
   Sync.onData(() => {
-    const editing = /\/(neu|bearbeiten)|einstellungen|benutzer/.test(location.hash) || !document.getElementById('sigModal').hidden;
-    if (!editing) router();
+    const typing = document.activeElement && document.activeElement.matches('input, textarea, select');
+    const editing = /\/(neu|bearbeiten)|einstellungen|benutzer/.test(location.hash) || !document.getElementById('sigModal').hidden || typing;
+    if (editing) return;
+    const y = window.scrollY; // Scrollposition beim Neuzeichnen beibehalten
+    router();
+    window.scrollTo(0, y);
   });
   updateSyncBadge();
   window.addEventListener('hashchange', router);

@@ -79,7 +79,9 @@ const Sync = (() => {
         needsSetup = !!h.needsSetup;
         break;
       } catch {
-        if (configured) { base = configured; setStatus('offline', 'Server nicht erreichbar'); }
+        // Eingestellter Server – oder automatisch erkannter, bei dem dieses Gerät schon angemeldet war –
+        // ist gerade nicht erreichbar: trotzdem verwenden, der Abgleich wird nachgeholt.
+        if (configured || token) { base = url; setStatus('offline', 'Server nicht erreichbar'); }
       }
     }
     if (!base) return;
@@ -112,23 +114,31 @@ const Sync = (() => {
       if (upload) Store.markAllDirty();
       else await Store.resetForServer();
     }
+    // Neuer Server ohne Firmendaten: die Einstellungen dieses Geräts übernehmen
+    if (!remote.changes.some((c) => c.coll === 'settings')) await Store.saveSettings({});
+  }
+
+  /** Sitzung übernehmen; scheitert die Ersteinrichtung des Geräts, bleibt es abgemeldet (erneuter Versuch möglich). */
+  async function begin(d, chooseUpload) {
+    setSession(d.token, d.user);
+    try {
+      await firstConnect(chooseUpload);
+    } catch (e) {
+      setSession(null, null);
+      throw e;
+    }
+    start();
+    return d.user;
   }
 
   async function login(username, password, chooseUpload) {
-    const d = await request('api/login', { method: 'POST', body: { username, password } });
-    setSession(d.token, d.user);
-    await firstConnect(chooseUpload);
-    start();
-    return d.user;
+    return begin(await request('api/login', { method: 'POST', body: { username, password } }), chooseUpload);
   }
 
   async function setup(data, chooseUpload) {
     const d = await request('api/setup', { method: 'POST', body: data });
     needsSetup = false;
-    setSession(d.token, d.user);
-    await firstConnect(chooseUpload);
-    start();
-    return d.user;
+    return begin(d, chooseUpload);
   }
 
   async function logout() {
