@@ -123,6 +123,33 @@ const Store = (() => {
     .filter((e) => e.systemId === systemId)
     .sort((a, b) => (a.datum || '').localeCompare(b.datum || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
 
+  // --- Anlagen-Nummern: <Kundennummer>-0001, -0002, … ---
+  function numberSuffix(nr, prefix) {
+    const m = String(nr || '').match(/^(.*)-(\d+)$/);
+    return m && m[1] === prefix ? Number(m[2]) : 0;
+  }
+
+  /** Nächste freie Anlagen-Nr. des Kunden ('' wenn keine Kundennummer hinterlegt). */
+  function nextSystemNumber(customerId) {
+    const c = customer(customerId);
+    const prefix = c && (c.kundennr || '').trim();
+    if (!prefix) return '';
+    const used = systemsOf(customerId).map((x) => numberSuffix(x.anlagenNr, prefix));
+    const counter = c.anlagenZaehlerPrefix === prefix ? Number(c.anlagenZaehler) || 0 : 0;
+    const next = Math.max(counter, ...used) + 1;
+    return `${prefix}-${String(next).padStart(4, '0')}`;
+  }
+
+  /** Zähler merken, damit Nummern gelöschter Anlagen nicht erneut vergeben werden. */
+  function noteSystemNumber(customerId, nr) {
+    const c = customer(customerId);
+    const prefix = c && (c.kundennr || '').trim();
+    const n = prefix ? numberSuffix(nr, prefix) : 0;
+    if (!n) return;
+    const counter = c.anlagenZaehlerPrefix === prefix ? Number(c.anlagenZaehler) || 0 : 0;
+    if (n > counter) Object.assign(c, { anlagenZaehler: n, anlagenZaehlerPrefix: prefix });
+  }
+
   function upsert(list, obj) {
     const now = new Date().toISOString();
     obj.updatedAt = now;
@@ -164,7 +191,7 @@ const Store = (() => {
 
   return {
     load, save, get, replace, uid, customer, location, locationsOf, system, entry, systemsOf, systemsAt, entriesOf,
-    upsert, removeCustomer, removeLocation, removeSystem, removeEntry, DEFAULT_SETTINGS,
+    upsert, nextSystemNumber, noteSystemNumber, removeCustomer, removeLocation, removeSystem, removeEntry, DEFAULT_SETTINGS,
   };
 })();
 

@@ -9,6 +9,8 @@ nach Art. 7 der F-Gase-Verordnung (EU) 2024/573 – für **Moritz Herrmann Heizu
   Nachkontrollen der prüfpflichtigen Anlagen, nach Datum sortiert, überfällige rot markiert
 - **Startseite: nächste Wartungen** – nach Wartungsintervall der Anlagen, nach Datum sortiert
 - **Kunden** (Betreiber) anlegen, bearbeiten, suchen
+- **Automatische Anlagen-Nr.**: Kunden-Nr. + laufende Nummer (z. B. `10023-0001`, `10023-0002`, …);
+  Nummern gelöschter Anlagen werden nicht erneut vergeben
 - **Standorte** je Kunde (z. B. Filialen, Lager) mit eigener Anschrift und Ansprechpartner
 - **Anlagen** je Standort anlegen – alle Stammdaten der Vorlage:
   Betreiber, Standort (+ Aufstellort), Anlagen-Nr./Bezeichnung, Anlagentyp, Kältemittel, GWP-Wert,
