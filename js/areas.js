@@ -152,7 +152,8 @@ const Areas = (() => {
         fields: [
           { name: 'vordruck', label: 'Vordruck / Eingangsdruck', unit: 'bar', num: true, when: (s) => hasDruck(s) || isArmatur(s) },
           { name: 'hinterdruck', label: 'Hinterdruck / Ausgangsdruck', unit: 'bar', num: true, when: hasDruck },
-          { name: 'differenzdruck', label: 'Differenzdruck Systemtrenner', unit: 'bar', num: true, when: (s) => /systemtrenner/i.test(t(s)) },
+          // nicht mehr erfasst – nur noch Anzeige bereits gespeicherter Werte
+          { name: 'differenzdruck', label: 'Differenzdruck Systemtrenner', unit: 'bar', num: true, legacy: true, when: (s) => /systemtrenner/i.test(t(s)) },
           { name: 'wwTemp', label: 'Warmwassertemperatur (Austritt)', unit: '°C', num: true, when: isSpeicher },
           { name: 'zirkTemp', label: 'Zirkulationsrücklauf', unit: '°C', num: true, when: (s) => isSpeicher(s) || /zirkulation/i.test(t(s)) },
           { name: 'anodeZustand', label: 'Zustand Schutzanode', type: 'select', options: ['', 'in Ordnung', 'verbraucht – getauscht', 'verbraucht – Tausch empfohlen'], when: isSpeicher },
@@ -163,7 +164,7 @@ const Areas = (() => {
     ],
     arbeiten: [
       'Sichtprüfung / Dichtheit', 'Funktionsprüfung', 'Filter rückgespült', 'Filtereinsatz gewechselt', 'Siebe / Dichtungen gereinigt bzw. getauscht',
-      'Druckminderer geprüft / eingestellt', 'Sicherheitsventil angelüftet', 'Systemtrenner geprüft (Differenzdruck)', 'Rückflussverhinderer geprüft',
+      'Druckminderer geprüft / eingestellt', 'Sicherheitsventil angelüftet', 'Kartuscheneinsatz getauscht', 'Rückflussverhinderer geprüft',
       'Speicher gereinigt / entkalkt', 'Schutzanode geprüft', 'Thermische Desinfektion durchgeführt', 'Regeneriersalz / Wirkstoff nachgefüllt',
     ],
   };

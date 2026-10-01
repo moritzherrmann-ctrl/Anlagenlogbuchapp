@@ -184,7 +184,7 @@ const Generic = (() => {
       arbeiten: [],
     };
     const done = new Set(v.arbeiten || []);
-    const sections = area.entrySections.map((sec) => ({ ...sec, fields: Areas.visible(sec.fields, s) })).filter((sec) => sec.fields.length);
+    const sections = area.entrySections.map((sec) => ({ ...sec, fields: Areas.visible(sec.fields, s).filter((f) => !f.legacy) })).filter((sec) => sec.fields.length);
     render(`
       ${crumbs({ c, l: Store.location(s.locationId), s })}
       <h1>${e ? 'Eintrag bearbeiten' : 'Neuer Eintrag'}</h1>
