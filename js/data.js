@@ -613,6 +613,7 @@ const FGas = (() => {
       return years.get(y);
     };
     for (const e of entries) {
+      if (e.taetigkeit === 'Installation') continue; // Erstbefüllung bei Inbetriebnahme ist kein Verlust-Nachfüllen
       const add = num(e.mengeZugefuegt) || 0;
       const rem = num(e.mengeEntnommen) || 0;
       if (!add && !rem) continue;

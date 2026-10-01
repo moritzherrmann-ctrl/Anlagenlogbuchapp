@@ -425,7 +425,7 @@ const PdfExport = (() => {
       });
       doc.setFontSize(7.5);
       doc.setTextColor(...GREY);
-      doc.text('* zugefügte Menge im Jahr bezogen auf die Füllmenge der Anlage (Hinweis auf Leckageverluste).', M, doc.lastAutoTable.finalY + 4);
+      doc.text('* zugefügte Menge im Jahr bezogen auf die Füllmenge der Anlage (Hinweis auf Leckageverluste). Erstbefüllung bei Installation nicht enthalten.', M, doc.lastAutoTable.finalY + 4);
       doc.setTextColor(0);
     } else {
       doc.setFontSize(9);

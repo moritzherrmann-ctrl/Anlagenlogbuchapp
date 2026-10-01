@@ -679,7 +679,7 @@ function balanceCard(bal) {
       <thead><tr><th>Jahr</th><th>zugefügt kg</th><th>entnommen kg</th><th>Nachfüllrate*</th><th>davon neu</th><th>recycelt</th><th>aufgearb.</th></tr></thead>
       <tbody>${bal.rows.map((r) => line(r)).join('')}${bal.rows.length > 1 ? line(bal.total, 'total') : ''}</tbody>
     </table></div>
-    <p class="muted small" style="margin:8px 0 0">* zugefügte Menge im Jahr bezogen auf die Füllmenge der Anlage (Hinweis auf Leckageverluste).
+    <p class="muted small" style="margin:8px 0 0">* zugefügte Menge im Jahr bezogen auf die Füllmenge der Anlage (Hinweis auf Leckageverluste). Die Erstbefüllung bei der Installation ist nicht enthalten.
       ${bal.total.unbekannt ? ` ${fmtNum(bal.total.unbekannt, 3)} kg ohne Herkunftsangabe.` : ''}</p>
   </div>`;
 }
