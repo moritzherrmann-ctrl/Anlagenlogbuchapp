@@ -253,3 +253,5 @@ table.data tr.total td { font-weight: 700; border-top: 2px solid var(--border); 
 .unit .field input, .unit .field select { background: var(--surface); }
 .unit-refs { display: flex; flex-wrap: wrap; gap: 0 18px; }
 .unit-refs .check { min-height: 36px; white-space: nowrap; flex-direction: row; width: auto; }
+.sub-legend { font-size: 0.95rem; margin: 14px 0 6px; color: var(--muted, #555); }
+.sub-legend:first-of-type { margin-top: 4px; }

@@ -495,7 +495,40 @@ const PdfExport = (() => {
     });
 
     footnote(doc, '* Tätigkeit: Installation · Wartung/Instandhaltung · Reparatur · Dichtheitskontrolle · Rückgewinnung · Stilllegung.');
-    photoPages(doc, 5, sys, entries, photos);
+
+    // Wartungsprotokolle: Messwerte, Checkliste, Ersatzteile, Mängel
+    const area = Areas.get('kaelte');
+    const measureFields = area.entrySections.flatMap((sec) => Areas.visible(sec.fields, sys));
+    const work = entries.filter((e) => (e.arbeiten || []).length || e.ersatzteile || e.maengel || measureFields.some((f) => e[f.name]));
+    let photoNo = 5;
+    if (work.length) {
+      doc.addPage('a4', 'landscape');
+      y = sectionTitle(doc, 5, 'Wartung / Instandhaltung – Protokolle', 22);
+      photoNo = 6;
+      landscapeTable(doc, {
+        startY: y,
+        margin: { left: M, right: M, top: 18, bottom: 24 },
+        theme: 'grid',
+        rowPageBreak: 'avoid',
+        head: [['Datum', 'Tätigkeit', 'Messwerte', 'Durchgeführte Arbeiten', 'Ersatzteile / Material', 'Mängel / Empfehlungen', 'Techniker']],
+        body: work.map((e) => [
+          fmtDate(e.datum),
+          (e.taetigkeit || '').replace('/', '/\n'),
+          measureFields.map((f) => (Areas.display(f, e[f.name]) ? `${f.label}: ${Areas.display(f, e[f.name])}` : '')).filter(Boolean).join('\n'),
+          (e.arbeiten || []).map((a) => '• ' + a).join('\n'),
+          e.ersatzteile || '',
+          e.maengel || '',
+          e.techniker || '',
+        ]),
+        styles: { font: 'helvetica', fontSize: 7.8, cellPadding: 1.6, lineColor: LINE, lineWidth: 0.25, textColor: [20, 20, 20], valign: 'top', overflow: 'linebreak' },
+        headStyles: { fillColor: LABEL_BG, textColor: [40, 50, 65], fontStyle: 'bold', fontSize: 7.5, valign: 'middle' },
+        columnStyles: {
+          0: { cellWidth: 19 }, 1: { cellWidth: 26 }, 2: { cellWidth: 52 }, 3: { cellWidth: 70 },
+          4: { cellWidth: 36 }, 5: { cellWidth: 40 }, 6: { cellWidth: 24 },
+        },
+      });
+    }
+    photoPages(doc, photoNo, sys, entries, photos);
     return doc;
   }
 

@@ -237,6 +237,45 @@ const Areas = (() => {
     short: 'Kälte',
     icon: '❄️',
     desc: 'Klima- und Kälteanlagen nach F-Gase-Verordnung',
+    // Wartung / Instandhaltung: Messwerte und Checkliste (Formular in app.js)
+    workActs: ['Wartung/Instandhaltung', 'Installation', 'Reparatur'],
+    entrySections: [
+      {
+        legend: 'Messwerte',
+        fields: [
+          { name: 'aussentemp', label: 'Außentemperatur', unit: '°C', num: true },
+          { name: 'hochdruck', label: 'Hochdruck', unit: 'bar', num: true },
+          { name: 'niederdruck', label: 'Niederdruck', unit: 'bar', num: true },
+          { name: 'verfluessigung', label: 'Verflüssigungstemperatur', unit: '°C', num: true },
+          { name: 'verdampfung', label: 'Verdampfungstemperatur', unit: '°C', num: true },
+          { name: 'ueberhitzung', label: 'Überhitzung', unit: 'K', num: true },
+          { name: 'unterkuehlung', label: 'Unterkühlung', unit: 'K', num: true },
+          { name: 'luftEin', label: 'Lufteintritt Innengerät', unit: '°C', num: true },
+          { name: 'luftAus', label: 'Luftaustritt Innengerät', unit: '°C', num: true },
+          { name: 'stromaufnahme', label: 'Stromaufnahme Verdichter', unit: 'A', num: true },
+        ],
+      },
+    ],
+    arbeiten: [
+      'Sichtprüfung Anlage auf Beschädigung, Ölspuren und Korrosion',
+      'Kältemittelleitungen, Verbindungen und Isolierung geprüft',
+      'Luftfilter Innengerät gereinigt / gewechselt',
+      'Verdampfer / Wärmetauscher Innengerät gereinigt',
+      'Verflüssiger / Lamellen Außengerät gereinigt',
+      'Kondensatwanne gereinigt und desinfiziert',
+      'Kondensatablauf / Kondensatpumpe geprüft',
+      'Ventilatoren und Lager geprüft',
+      'Verdichter geprüft (Geräusch, Vibration, Stromaufnahme)',
+      'Betriebsdrücke und Temperaturen gemessen',
+      'Sicherheits- und Druckschalter geprüft',
+      'Elektrische Anschlüsse und Klemmen geprüft / nachgezogen',
+      'Regelung / Fernbedienung / Sensoren geprüft',
+      'Befestigung und Schwingungsdämpfer geprüft',
+      { t: 'Leckage-Erkennungssystem geprüft', when: (s) => s.leckageSystem === 'ja' },
+      { t: 'Abtauung / Abtauheizung geprüft', when: (s) => /kühl|tiefkühl|wärmepumpe/i.test(s.typ || '') },
+      { t: 'Türdichtungen und Türheizung geprüft', when: (s) => /kühlzelle|kühlraum|kühlmöbel/i.test(s.typ || '') },
+      'Probelauf / Funktionsprüfung durchgeführt',
+    ],
   };
 
   const all = { kaelte, heizung, trinkwasser };

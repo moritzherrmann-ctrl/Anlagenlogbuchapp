@@ -325,7 +325,6 @@ const Generic = (() => {
       techniker: Sync.user ? Sync.user.name : settings.techniker,
       arbeiten: [],
     };
-    const done = new Set(v.arbeiten || []);
     const arbeiten = Areas.arbeitenFor(area, s);
     const sections = area.entrySections.map((sec) => ({ ...sec, fields: Areas.visible(sec.fields, s).filter((f) => !f.legacy) })).filter((sec) => sec.fields.length);
     render(`
@@ -346,13 +345,7 @@ const Generic = (() => {
           </fieldset>`).join('')}
         <fieldset class="card">
           <legend>Durchgeführte Arbeiten</legend>
-          <div class="checks">${arbeiten.map((a) => `
-            <label class="check"><input type="checkbox" data-arbeit value="${esc(a)}"${done.has(a) ? ' checked' : ''}> ${esc(a)}</label>`).join('')}
-          </div>
-          <div class="grid" style="margin-top:8px">
-            ${field('weitereArbeiten', 'Weitere Arbeiten (je Zeile eine)', (v.arbeiten || []).filter((a) => !arbeiten.includes(a)).join('\n'), { type: 'textarea', full: true })}
-            ${field('ersatzteile', 'Ersatzteile / Material', v.ersatzteile, { type: 'textarea', full: true })}
-          </div>
+          ${checklistHtml(arbeiten, v)}
         </fieldset>
         <fieldset class="card">
           <legend>Ergebnis</legend>
@@ -385,9 +378,7 @@ const Generic = (() => {
       if (photos.busy) { alert('Bitte warten, bis alle Fotos verarbeitet sind.'); return; }
       const d = formData(f);
       d.fotos = photos.list;
-      const extra = (d.weitereArbeiten || '').split('\n').map((x) => x.trim()).filter(Boolean);
-      delete d.weitereArbeiten;
-      d.arbeiten = [...[...f.querySelectorAll('[data-arbeit]:checked')].map((x) => x.value), ...extra];
+      readChecklist(f, d);
       const saved = await Store.upsert('entries', { ...d, id: id || undefined, systemId: s.id });
       toast('Eintrag gespeichert');
       go('#/eintrag/' + saved.id);
@@ -399,6 +390,34 @@ const Generic = (() => {
       toast('Eintrag gelöscht');
       go('#/anlage/' + s.id);
     });
+  }
+
+  /** Checkliste „Durchgeführte Arbeiten“ samt weiteren Arbeiten und Ersatzteilen. */
+  function checklistHtml(arbeiten, v) {
+    const done = new Set(v.arbeiten || []);
+    return `<div class="checks">${arbeiten.map((a) => `
+        <label class="check"><input type="checkbox" data-arbeit value="${esc(a)}"${done.has(a) ? ' checked' : ''}> ${esc(a)}</label>`).join('')}
+      </div>
+      <div class="grid" style="margin-top:8px">
+        ${field('weitereArbeiten', 'Weitere Arbeiten (je Zeile eine)', (v.arbeiten || []).filter((a) => !arbeiten.includes(a)).join('\n'), { type: 'textarea', full: true })}
+        ${field('ersatzteile', 'Ersatzteile / Material', v.ersatzteile, { type: 'textarea', full: true })}
+      </div>`;
+  }
+
+  /** Arbeiten aus Checkliste und Freitext übernehmen (weitereArbeiten wird entfernt). */
+  function readChecklist(form, d) {
+    const extra = (d.weitereArbeiten || '').split('\n').map((x) => x.trim()).filter(Boolean);
+    delete d.weitereArbeiten;
+    d.arbeiten = [...[...form.querySelectorAll('[data-arbeit]:checked')].map((x) => x.value), ...extra];
+    return d;
+  }
+
+  /** Messwerte, Arbeiten, Ersatzteile und Mängel eines Eintrags (für die Kälte-Ansicht). */
+  function workRows(e, s) {
+    const area = Areas.get(Areas.of(s));
+    const mess = (area.entrySections || []).flatMap((sec) => Areas.visible(sec.fields, s)).map((f) => kv(f.label, Areas.display(f, e[f.name]))).join('');
+    const arbeiten = (e.arbeiten || []).length ? `<dt>Durchgeführte Arbeiten</dt><dd><ul class="plain">${e.arbeiten.map((a) => `<li>✓ ${esc(a)}</li>`).join('')}</ul></dd>` : '';
+    return mess + arbeiten + kv('Ersatzteile / Material', e.ersatzteile) + kv('Mängel / Empfehlungen', e.maengel);
   }
 
   /** Zeilen der Eintrags-Ansicht. */
@@ -420,5 +439,5 @@ const Generic = (() => {
     ].join('');
   }
 
-  return { systemForm, systemView, entryForm, entryRows };
+  return { systemForm, systemView, entryForm, entryRows, specField, checklistHtml, readChecklist, workRows };
 })();

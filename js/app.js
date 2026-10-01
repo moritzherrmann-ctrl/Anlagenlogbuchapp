@@ -643,6 +643,7 @@ function viewSystem(id) {
     ${balanceCard(bal)}
     <div class="head-row">
       <h2 style="margin:8px 0 0;flex:1">Einträge / Prüfungen</h2>
+      <a class="btn" href="#/eintrag/neu?anlage=${id}&taetigkeit=Wartung%2FInstandhaltung">+ Wartung</a>
       <a class="btn primary" href="#/eintrag/neu?anlage=${id}">+ Neuer Eintrag</a>
     </div>
     ${entries.length ? `<ul class="list">${[...entries].reverse().map((e) => `
@@ -712,9 +713,10 @@ function viewEntryForm(id, q) {
   if (!s) return notFound();
   if (!Areas.isKaelte(s)) return Generic.entryForm(id, q);
   const c = Store.customer(s.customerId);
+  const kaelteArea = Areas.get('kaelte');
   const v = e || {
     datum: today(),
-    taetigkeit: 'Dichtheitskontrolle',
+    taetigkeit: q.get('taetigkeit') || 'Dichtheitskontrolle',
     fachbetrieb: `${settings.firma} (Zert.-Nr. ${settings.zertifikatNr})`,
     techniker: Sync.user ? Sync.user.name : settings.techniker,
     technikerZertNr: Sync.user ? Sync.user.zertNr : settings.technikerZertNr,
@@ -748,6 +750,16 @@ function viewEntryForm(id, q) {
           ${field('nachkontrolleAm', 'Nachkontrolle am', v.nachkontrolleAm, { type: 'date', hint: 'Pflicht innerhalb eines Monats nach Reparatur' })}
         </div>
       </fieldset>
+      <fieldset class="card" id="workBox">
+        <legend>Wartung / Instandhaltung</legend>
+        <h3 class="sub-legend">Messwerte</h3>
+        <div class="grid">${kaelteArea.entrySections.flatMap((sec) => Areas.visible(sec.fields, s)).map((x) => Generic.specField(x, v[x.name])).join('')}</div>
+        <h3 class="sub-legend">Durchgeführte Arbeiten</h3>
+        ${Generic.checklistHtml(Areas.arbeitenFor(kaelteArea, s), v)}
+        <div class="grid">
+          ${field('maengel', 'Mängel / Empfehlungen', v.maengel, { type: 'textarea', full: true })}
+        </div>
+      </fieldset>
       ${Photos.editorHtml()}
       <fieldset class="card">
         <legend>Ausführung</legend>
@@ -771,6 +783,9 @@ function viewEntryForm(id, q) {
   const toggleLeak = () => {
     const show = f.ergebnis.value === 'Leckage' || f.taetigkeit.value === 'Reparatur' || f.leckageUrsache.value;
     document.getElementById('leakBox').hidden = !show;
+    // Checkliste und Messwerte bei Wartung, Installation und Reparatur (oder wenn schon etwas erfasst ist)
+    const hasWork = e && ((e.arbeiten || []).length || e.maengel || e.ersatzteile || kaelteArea.entrySections.some((sec) => sec.fields.some((x) => e[x.name])));
+    document.getElementById('workBox').hidden = !(kaelteArea.workActs.includes(f.taetigkeit.value) || hasWork);
   };
   f.addEventListener('change', toggleLeak);
   toggleLeak();
@@ -788,6 +803,12 @@ function viewEntryForm(id, q) {
       return;
     }
     if (photos.busy) { alert('Bitte warten, bis alle Fotos verarbeitet sind.'); return; }
+    Generic.readChecklist(f, d);
+    if (document.getElementById('workBox').hidden) {
+      // Ausgeblendete Wartungsfelder nicht speichern
+      for (const x of kaelteArea.entrySections.flatMap((sec) => sec.fields)) delete d[x.name];
+      d.arbeiten = []; d.ersatzteile = ''; d.maengel = '';
+    }
     d.fotos = photos.list;
     const saved = await Store.upsert('entries', { ...d, id: id || undefined, systemId: s.id });
     toast('Eintrag gespeichert');
@@ -840,6 +861,7 @@ function viewEntry(id) {
         ${row('Ergebnis Dichtheitskontrolle', e.ergebnis)}
         ${row('Leckage: Ursache & Reparatur', e.leckageUrsache)}
         ${row('Nachkontrolle am', fmtDate(e.nachkontrolleAm))}
+        ${Generic.workRows(e, s)}
         ${row('Fachbetrieb', e.fachbetrieb)}
         ${row('Techniker', [e.techniker, e.technikerZertNr ? 'Zert.-Nr. ' + e.technikerZertNr : ''].filter(Boolean).join(', '))}
         ${row('Bemerkung', e.bemerkung)}` : Generic.entryRows(e, s)}

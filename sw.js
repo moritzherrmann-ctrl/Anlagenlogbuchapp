@@ -1,5 +1,5 @@
 /* Offline-Cache für die App-Dateien. Bei Änderungen VERSION erhöhen. */
-const VERSION = 'anlagenbuch-v21';
+const VERSION = 'anlagenbuch-v22';
 const FILES = [
   './',
   'index.html',
