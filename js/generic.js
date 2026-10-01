@@ -19,6 +19,15 @@ const Generic = (() => {
           <option value="">${opts.length ? '– noch nicht verbunden –' : '– keine Kälteanlage beim Kunden –'}</option>
           ${opts.map(([id, t]) => `<option value="${esc(id)}"${id === val ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
       }
+      if (sf.type === 'unitRefs') {
+        // Zuordnung zu Geräten einer anderen Liste im selben Formular (Häkchen werden in refreshRefs gebaut)
+        return `<div class="field full"><span>${esc(label)}</span><div class="unit-refs" data-refs="${sf.name}" data-ref="${sf.ref}"
+          data-ref-label="${esc(sf.refLabel)}" data-checked="${esc(JSON.stringify(Array.isArray(val) ? val : '*'))}"></div></div>`;
+      }
+      if (sf.type === 'select') {
+        return `<label class="field"><span>${esc(label)}</span><select data-sub="${sf.name}">
+          ${sf.options.map((o) => `<option value="${esc(o)}"${o === val ? ' selected' : ''}>${esc(o || '–')}</option>`).join('')}</select></label>`;
+      }
       return `<label class="field"><span>${esc(label)}</span><input data-sub="${sf.name}" value="${esc(val)}"${sf.num ? ' inputmode="decimal"' : ''}></label>`;
     }).join('');
     return `<div class="unit" data-unit="${esc(u.id)}">
@@ -29,11 +38,26 @@ const Generic = (() => {
 
   function unitsEditor(f, list, ctx) {
     const units = Array.isArray(list) && list.length ? list : [{ id: Store.uid() }];
-    return `<div class="units" data-units="${f.name}" style="grid-column:1/-1">
+    return `<div class="units" data-units="${f.name}" data-min="${f.min ?? 1}" style="grid-column:1/-1">
       ${f.hint ? `<p class="hint" style="margin:0 0 8px">${esc(f.hint)}</p>` : ''}
       <div class="unit-list">${units.map((u, i) => unitHtml(f, u, i, ctx)).join('')}</div>
-      <button type="button" class="btn small" data-unit-add>+ weiteres ${esc(f.unitLabel)} (Kaskade)</button>
+      <button type="button" class="btn small" data-unit-add>+ ${f.name === 'aussengeraete' ? `weiteres ${esc(f.unitLabel)} (Kaskade)` : `${esc(f.unitLabel)} hinzufügen`}</button>
     </div>`;
+  }
+
+  /** Zuordnungs-Häkchen (z. B. Inneneinheit → Außengeräte) an die aktuelle Geräteliste anpassen. */
+  function refreshRefs(form) {
+    form.querySelectorAll('.unit-refs').forEach((box) => {
+      const refUnits = [...form.querySelectorAll(`[data-units="${box.dataset.ref}"] .unit`)];
+      const stored = JSON.parse(box.dataset.checked || '[]');
+      const checked = box.dataset.init === '1' ? [...box.querySelectorAll('input:checked')].map((x) => x.value)
+        : stored === '*' ? refUnits.map((el) => el.dataset.unit) : stored; // neue Einheit: allen Geräten zugeordnet
+      box.dataset.init = '1';
+      box.innerHTML = refUnits.length
+        ? refUnits.map((el, i) => `<label class="check"><input type="checkbox" value="${esc(el.dataset.unit)}"${checked.includes(el.dataset.unit) ? ' checked' : ''}>
+            ${esc(box.dataset.refLabel)} ${i + 1}</label>`).join('')
+        : `<span class="hint">Noch kein ${esc(box.dataset.refLabel)} angelegt.</span>`;
+    });
   }
 
   /** Geräte-Editor verdrahten: hinzufügen, entfernen, neu nummerieren. */
@@ -42,19 +66,28 @@ const Generic = (() => {
       const box = form.querySelector(`[data-units="${f.name}"]`);
       if (!box) continue;
       const list = box.querySelector('.unit-list');
-      const renumber = () => list.querySelectorAll('.unit-head strong').forEach((el, i) => { el.textContent = `${f.unitLabel} ${i + 1}`; });
+      const min = f.min ?? 1;
+      const renumber = () => list.querySelectorAll(':scope > .unit > .unit-head strong').forEach((el, i) => { el.textContent = `${f.unitLabel} ${i + 1}`; });
       box.addEventListener('click', (e) => {
         if (e.target.closest('[data-unit-add]')) {
-          list.insertAdjacentHTML('beforeend', unitHtml(f, { id: Store.uid() }, list.children.length, ctx));
+          // Neue Inneneinheit: standardmäßig allen vorhandenen Außengeräten zugeordnet
+          const u = { id: Store.uid() };
+          for (const sf of f.subfields.filter((x) => x.type === 'unitRefs')) {
+            u[sf.name] = [...form.querySelectorAll(`[data-units="${sf.ref}"] .unit`)].map((el) => el.dataset.unit);
+          }
+          list.insertAdjacentHTML('beforeend', unitHtml(f, u, list.children.length, ctx));
           renumber();
+          refreshRefs(form);
         } else if (e.target.closest('[data-unit-del]')) {
-          if (list.children.length <= 1) { alert(`Mindestens ein ${f.unitLabel} ist nötig.`); return; }
+          if (list.children.length <= min) { alert(`Mindestens ein ${f.unitLabel} ist nötig.`); return; }
           if (!confirm(`${f.unitLabel} entfernen?`)) return;
           e.target.closest('.unit').remove();
           renumber();
+          refreshRefs(form);
         }
       });
     }
+    refreshRefs(form);
   }
 
   /** Geräte-Listen aus dem Formular lesen. */
@@ -64,8 +97,13 @@ const Generic = (() => {
       out[box.dataset.units] = [...box.querySelectorAll('.unit')].map((el) => {
         const u = { id: el.dataset.unit };
         el.querySelectorAll('[data-sub]').forEach((inp) => { u[inp.dataset.sub] = inp.value.trim(); });
+        el.querySelectorAll('[data-refs]').forEach((r) => { u[r.dataset.refs] = [...r.querySelectorAll('input:checked')].map((x) => x.value); });
         return u;
       });
+      // Listen ohne Pflichtgerät (min 0): leere Einträge nicht speichern
+      if (box.dataset.min === '0') {
+        out[box.dataset.units] = out[box.dataset.units].filter((u) => Object.entries(u).some(([k, v]) => k !== 'id' && typeof v === 'string' && v));
+      }
     });
     return out;
   }
@@ -105,8 +143,14 @@ const Generic = (() => {
   /** Geräte (Kaskade) mit Kältekreis: Link zur Kälteanlage oder Knopf zum Anlegen und Verbinden. */
   function unitRows(f, s) {
     const units = s[f.name] || [];
+    if (!f.subfields.some((sf) => sf.type === 'systemLink')) {
+      return units.map((u, i) => `<dt>${esc(f.unitLabel)} ${i + 1}</dt><dd>${esc(Areas.unitParts(f, u, s).join(', ') || '–')}</dd>`).join('');
+    }
     const rows = units.map((u, i) => {
-      const parts = f.subfields.filter((sf) => sf.type !== 'systemLink').map((sf) => Areas.display(sf, u[sf.name])).filter(Boolean);
+      const parts = Areas.unitParts(f, u, s);
+      // Welche Inneneinheiten hängen an diesem Außengerät?
+      const innen = (s.innengeraete || []).map((x, j) => ((x.aussen || []).includes(u.id) ? j + 1 : 0)).filter(Boolean);
+      if (f.name === 'aussengeraete' && innen.length) parts.push(`Inneneinheit ${innen.join(', ')}`);
       const x = Store.system(u.kaelteAnlage);
       const link = x
         ? `<a href="#/anlage/${x.id}">❄️ ${esc(systemTitle(x))}</a>${x.kaeltemittel ? ` · ${esc(x.kaeltemittel)}` : ''}`

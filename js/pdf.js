@@ -265,7 +265,7 @@ const PdfExport = (() => {
       [label('Betreiber (Name, Anschrift)'), betreiberText(cust)],
       [label('Anlagen-Standort'), standort],
       [label('Anlagen-Nr. / Bezeichnung'), systemLabel(sys)],
-      ...Areas.visibleSections(area.systemSections, sys).flatMap((sec) => sec.fields.map((f) => [label(f.label), Areas.display(f, sys[f.name])])),
+      ...Areas.visibleSections(area.systemSections, sys).flatMap((sec) => sec.fields.map((f) => [label(f.label), Areas.display(f, sys[f.name], sys)])),
       [label('Inbetriebnahme / errichtet durch'), [sys.errichtetAm ? fmtDate(sys.errichtetAm) : '', sys.errichtetDurch].filter(Boolean).join(' · ')],
       [label('Wartungsintervall'), m ? `alle ${m} Monate` : 'keine regelmäßige Wartung'],
       [label('Nächste Wartung fällig'), maint ? (maint.date ? fmtDate(maint.date) : 'offen') : '–'],

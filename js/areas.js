@@ -55,7 +55,7 @@ const Areas = (() => {
         when: isWP,
         fields: [
           {
-            name: 'aussengeraete', label: 'Außengeräte', type: 'units', unitLabel: 'Außengerät', full: true,
+            name: 'aussengeraete', label: 'Außengeräte', type: 'units', unitLabel: 'Außengerät', full: true, min: 1,
             hint: 'Bei einer Kaskade jedes Außengerät einzeln erfassen. Jedes Außengerät hat einen eigenen Kältekreis, der als Kälteanlage geführt wird (Kältemittel, Dichtheitskontrollen nach F-Gase-Verordnung).',
             subfields: [
               { name: 'hersteller', label: 'Hersteller' },
@@ -68,13 +68,31 @@ const Areas = (() => {
         ],
       },
       {
-        legend: 'Innengerät',
+        legend: 'Inneneinheiten',
         when: isWP,
         fields: [
-          { name: 'innenArt', label: 'Innengerät (Art)', type: 'select', options: ['', 'Hydraulikmodul / Hydraulikstation', 'Inneneinheit mit integriertem Speicher', 'Split-Inneneinheit', 'Wärmepumpen-Regler / Kaskadenregler', 'Sonstiges'] },
-          { name: 'innenHersteller', label: 'Hersteller Innengerät' },
-          { name: 'innenModell', label: 'Modell Innengerät' },
-          { name: 'innenSeriennr', label: 'Serien-Nr. Innengerät' },
+          {
+            name: 'innengeraete', label: 'Inneneinheiten', type: 'units', unitLabel: 'Inneneinheit', full: true, min: 0,
+            hint: 'Jede Inneneinheit einem oder mehreren Außengeräten zuordnen (z. B. ein Kaskadenregler für alle Außengeräte).',
+            subfields: [
+              { name: 'art', label: 'Art', type: 'select', options: ['', 'Hydraulikmodul / Hydraulikstation', 'Inneneinheit mit integriertem Speicher', 'Split-Inneneinheit', 'Wärmepumpen-Regler / Kaskadenregler', 'Sonstiges'] },
+              { name: 'hersteller', label: 'Hersteller' },
+              { name: 'modell', label: 'Modell / Typ' },
+              { name: 'seriennr', label: 'Serien-Nr.' },
+              { name: 'aussen', label: 'Zugeordnet zu', type: 'unitRefs', ref: 'aussengeraete', refLabel: 'Außengerät' },
+            ],
+          },
+        ],
+      },
+      {
+        legend: 'Pufferspeicher',
+        when: isWP,
+        fields: [
+          { name: 'pufferArt', label: 'Art', type: 'select', options: ['', 'kein Pufferspeicher', 'Trennpuffer', 'Reihenpuffer (Rücklauf)', 'Reihenpuffer (Vorlauf)', 'Kombispeicher (Heizung + Warmwasser)', 'Hygienespeicher'] },
+          { name: 'pufferInhalt', label: 'Inhalt', unit: 'l', num: true },
+          { name: 'pufferHersteller', label: 'Hersteller Pufferspeicher' },
+          { name: 'pufferModell', label: 'Modell Pufferspeicher' },
+          { name: 'pufferSeriennr', label: 'Serien-Nr. Pufferspeicher' },
         ],
       },
       {
@@ -250,15 +268,28 @@ const Areas = (() => {
     return x ? [x.anlagenNr, x.bezeichnung].filter(Boolean).join(' – ') : '';
   };
 
+  /** Zuordnung zu Geräten einer anderen Liste als Text, z. B. „Außengerät 1, 2“. */
+  function refText(sf, ids, sys) {
+    const ref = (sys && sys[sf.ref]) || [];
+    const nums = (ids || []).map((id) => ref.findIndex((u) => u.id === id) + 1).filter((n) => n > 0).sort((a, b) => a - b);
+    if (!nums.length) return '';
+    return nums.length === ref.length && ref.length > 1 ? `alle ${sf.refLabel}e` : `${sf.refLabel} ${nums.join(', ')}`;
+  }
+
+  /** Teile einer Geräte-Zeile (ohne Kältekreis-Verknüpfung). */
+  const unitParts = (f, u, sys) => f.subfields.filter((sf) => sf.type !== 'systemLink').map((sf) => {
+    if (sf.type === 'unitRefs') { const t = refText(sf, u[sf.name], sys); return t ? `für ${t}` : ''; }
+    return display(sf, u[sf.name]);
+  }).filter(Boolean);
+
   /** Eine Zeile je Gerät (Kaskade) für Anzeige/PDF. */
-  function unitLines(f, units) {
+  function unitLines(f, units, sys) {
     const lines = (units || []).map((u, i) => {
-      const parts = f.subfields.filter((sf) => sf.type !== 'systemLink').map((sf) => display(sf, u[sf.name])).filter(Boolean);
       const link = linkLabel(u.kaelteAnlage);
-      return `${f.unitLabel} ${i + 1}: ${parts.join(', ') || '–'}${link ? ` · Kältekreis ${link}` : ''}`;
+      return `${f.unitLabel} ${i + 1}: ${unitParts(f, u, sys).join(', ') || '–'}${link ? ` · Kältekreis ${link}` : ''}`;
     });
     const total = (units || []).reduce((a, u) => a + (FGas.num(u.leistung) || 0), 0);
-    if ((units || []).length > 1 && total) lines.push(`Kaskade gesamt: ${fmtNum(total, 1)} kW`);
+    if (f.name === 'aussengeraete' && (units || []).length > 1 && total) lines.push(`Kaskade gesamt: ${fmtNum(total, 1)} kW`);
     return lines;
   }
 
@@ -269,8 +300,8 @@ const Areas = (() => {
     .filter((sec) => sec.fields.length);
 
   /** Wert mit Einheit für Anzeige/PDF. */
-  function display(f, v) {
-    if (f.type === 'units') return unitLines(f, v).join('\n');
+  function display(f, v, sys) {
+    if (f.type === 'units') return unitLines(f, v, sys).join('\n');
     if (v === undefined || v === null || v === '' || v === false) return '';
     if (f.type === 'systemLink') return linkLabel(v);
     const val = f.num ? fmtNum(v, 3) : String(v);
@@ -288,6 +319,6 @@ const Areas = (() => {
   }
 
   return {
-    all, keys, get, of, isKaelte, isWP, get current() { return current; }, setCurrent, visible, visibleSections, display, arbeitenFor, heatPumpsOf,
+    all, keys, get, of, isKaelte, isWP, get current() { return current; }, setCurrent, visible, visibleSections, display, unitParts, arbeitenFor, heatPumpsOf,
   };
 })();

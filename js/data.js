@@ -80,6 +80,16 @@ const Store = (() => {
       }];
       delete sys.kaelteAnlage;
     }
+    // Wärmepumpen: bisheriges einzelnes Innengerät wird zu „Inneneinheit 1“ (allen Außengeräten zugeordnet)
+    for (const sys of s.systems) {
+      if (sys.bereich !== 'heizung' || !/wärmepumpe/i.test(sys.typ || '') || Array.isArray(sys.innengeraete)) continue;
+      const has = sys.innenArt || sys.innenHersteller || sys.innenModell || sys.innenSeriennr;
+      sys.innengeraete = has ? [{
+        id: `${sys.id}-i1`, art: sys.innenArt || '', hersteller: sys.innenHersteller || '', modell: sys.innenModell || '',
+        seriennr: sys.innenSeriennr || '', aussen: (sys.aussengeraete || []).map((u) => u.id),
+      }] : [];
+      for (const k of ['innenArt', 'innenHersteller', 'innenModell', 'innenSeriennr']) delete sys[k];
+    }
     for (const sys of s.systems) {
       if (sys.locationId && s.locations.some((l) => l.id === sys.locationId)) continue;
       const cust = s.customers.find((c) => c.id === sys.customerId) || {};
