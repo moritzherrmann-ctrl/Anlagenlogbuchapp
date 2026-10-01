@@ -293,9 +293,7 @@ function viewCustomer(id) {
   const c = Store.customer(id);
   if (!c) return notFound();
   const locations = Store.locationsOf(id);
-  const area = Areas.get(Areas.current);
-  const allSystems = PdfExport.customerSystems(id, null);
-  const areaSystems = PdfExport.customerSystems(id, area.key);
+
   render(`
     ${crumbs()}
     <div class="head-row">
@@ -311,10 +309,7 @@ function viewCustomer(id) {
         ${c.email ? `<dt>E-Mail</dt><dd><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></dd>` : ''}
         ${c.notizen ? `<dt>Notizen</dt><dd>${esc(c.notizen)}</dd>` : ''}
       </dl>
-      ${allSystems.length ? `<div class="actions">
-        ${areaSystems.length ? `<button class="btn" data-bundle="${area.key}">Sammel-PDF ${esc(area.short)} (${areaSystems.length})</button>` : ''}
-        ${allSystems.length > areaSystems.length ? `<button class="btn" data-bundle="">Sammel-PDF alle Bereiche (${allSystems.length})</button>` : ''}
-      </div>` : ''}
+      ${bundleButtons(id)}
     </div>
     <div class="head-row">
       <h2 style="margin:8px 0 0;flex:1">Standorte</h2>
@@ -330,12 +325,28 @@ function viewCustomer(id) {
     }).join('')}</ul>`
     : `<div class="empty">Für diesen Kunden ist noch kein Standort angelegt.<br>Lege zuerst einen Standort an – dort kannst du dann die Anlagen anlegen.</div>`}
   `);
+  bindBundleButtons(id);
+}
+
+/** Knöpfe für das Sammel-PDF (Kunde oder einzelner Standort): aktueller Bereich und alle Bereiche. */
+function bundleButtons(customerId, locationId = null) {
+  const area = Areas.get(Areas.current);
+  const all = PdfExport.customerSystems(customerId, null, locationId);
+  const inArea = PdfExport.customerSystems(customerId, area.key, locationId);
+  if (!all.length) return '';
+  return `<div class="actions">
+    ${inArea.length ? `<button class="btn" data-bundle="${area.key}">Sammel-PDF ${esc(area.short)} (${inArea.length})</button>` : ''}
+    ${all.length > inArea.length ? `<button class="btn" data-bundle="">Sammel-PDF alle Bereiche (${all.length})</button>` : ''}
+  </div>`;
+}
+
+function bindBundleButtons(customerId, locationId = null) {
   main.querySelectorAll('[data-bundle]').forEach((b) => b.addEventListener('click', async () => {
     const label = b.textContent;
     b.disabled = true;
     b.textContent = 'PDF wird erstellt …';
     try {
-      await PdfExport.downloadCustomer(id, b.dataset.bundle || null);
+      await PdfExport.downloadCustomer(customerId, b.dataset.bundle || null, locationId);
     } catch (err) {
       console.error(err);
       if (!/cancel/i.test(err.message)) alert('PDF konnte nicht erstellt werden: ' + err.message);
@@ -424,6 +435,7 @@ function viewLocation(id) {
         ${l.telefon ? `<dt>Telefon</dt><dd><a href="tel:${esc(l.telefon)}">${esc(l.telefon)}</a></dd>` : ''}
         ${l.notizen ? `<dt>Notizen</dt><dd>${esc(l.notizen)}</dd>` : ''}
       </dl>
+      ${bundleButtons(c.id, id)}
     </div>
     <div class="head-row">
       <h2 style="margin:8px 0 0;flex:1">${area.icon} ${esc(area.label)}</h2>
@@ -439,6 +451,7 @@ function viewLocation(id) {
     ${others.length ? `<p class="small muted" style="margin-top:12px">Weitere Anlagen an diesem Standort: ${others.map(([k, n]) =>
       `<a href="#/standort/${id}?bereich=${k}">${Areas.get(k).icon} ${n} × ${esc(Areas.get(k).short)}</a>`).join(' · ')}</p>` : ''}
   `);
+  bindBundleButtons(c.id, id);
 }
 
 // ---------- Anlage anlegen / bearbeiten ----------

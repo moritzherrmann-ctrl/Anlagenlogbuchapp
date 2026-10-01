@@ -469,16 +469,17 @@ const PdfExport = (() => {
   }
 
   /** Anlagen eines Kunden (optional nur ein Bereich), sortiert nach Bereich und Nummer. */
-  function customerSystems(customerId, areaKey) {
+  function customerSystems(customerId, areaKey, locationId) {
     return Store.systemsOf(customerId)
-      .filter((s) => !areaKey || Areas.of(s) === areaKey)
+      .filter((s) => (!areaKey || Areas.of(s) === areaKey) && (!locationId || s.locationId === locationId))
       .sort((a, b) => Areas.keys.indexOf(Areas.of(a)) - Areas.keys.indexOf(Areas.of(b)) || systemLabel(a).localeCompare(systemLabel(b), 'de'));
   }
 
-  /** Sammel-PDF: Übersicht + Anlagenbuch jeder Anlage des Kunden. */
-  async function buildCustomer(customerId, areaKey) {
+  /** Sammel-PDF: Übersicht + Anlagenbuch jeder Anlage des Kunden (optional nur ein Standort). */
+  async function buildCustomer(customerId, areaKey, locationId) {
     const cust = Store.customer(customerId);
-    const systems = customerSystems(customerId, areaKey);
+    const loc = locationId ? Store.location(locationId) : null;
+    const systems = customerSystems(customerId, areaKey, locationId);
     const photos = await Photos.load(systems.flatMap((s) => Store.entriesOf(s.id)));
     const doc = startDoc(null, `Anlagenübersicht ${cust.name}`);
     doc.setFont('helvetica', 'bold');
@@ -487,13 +488,21 @@ const PdfExport = (() => {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.text(betreiberText(cust), M, 31, { maxWidth: 180 });
+    let top = 37;
+    if (loc) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('Standort: ', M, top);
+      doc.setFont('helvetica', 'normal');
+      doc.text(locationText(loc), M + doc.getTextWidth('Standort: '), top, { maxWidth: 160 });
+      top += 6;
+    }
     doc.setFontSize(9);
     doc.setTextColor(...GREY);
-    doc.text(`${areaKey ? Areas.get(areaKey).label : 'Alle Bereiche'} · Stand ${fmtDate(todayISO())} · ${systems.length} ${systems.length === 1 ? 'Anlage' : 'Anlagen'}`, M, 37);
+    doc.text(`${areaKey ? Areas.get(areaKey).label : 'Alle Bereiche'} · Stand ${fmtDate(todayISO())} · ${systems.length} ${systems.length === 1 ? 'Anlage' : 'Anlagen'}`, M, top);
     doc.setTextColor(0);
     const dueText = (d) => (d ? (d.date ? fmtDate(d.date) : 'offen') : '–');
     doc.autoTable({
-      startY: 44,
+      startY: top + 7,
       margin: { left: M, right: M, bottom: 24 },
       theme: 'grid',
       head: [['Anlagen-Nr.', 'Bezeichnung', 'Bereich', 'Standort', 'Nächste Wartung', 'Nächste Dichtheitskontr.']],
@@ -522,15 +531,18 @@ const PdfExport = (() => {
     return `Anlagenbuch_${[safe(cust && cust.name), safe(sys.anlagenNr || sys.bezeichnung)].filter(Boolean).join('_')}_${todayISO()}.pdf`;
   }
 
-  const customerFilename = (customerId, areaKey) =>
-    `Anlagenuebersicht_${safe(Store.customer(customerId).name)}_${areaKey ? safe(Areas.get(areaKey).short) : 'alle'}_${todayISO()}.pdf`;
+  const customerFilename = (customerId, areaKey, locationId) => {
+    const loc = locationId ? Store.location(locationId) : null;
+    return `Anlagenuebersicht_${[safe(Store.customer(customerId).name), loc ? safe(loc.name) : '', areaKey ? safe(Areas.get(areaKey).short) : 'alle']
+      .filter(Boolean).join('_')}_${todayISO()}.pdf`;
+  };
 
   async function download(sysId) {
     return FileOut.save((await build(sysId)).output('blob'), filename(sysId), 'Anlagenbuch');
   }
 
-  async function downloadCustomer(customerId, areaKey) {
-    return FileOut.save((await buildCustomer(customerId, areaKey)).output('blob'), customerFilename(customerId, areaKey), 'Anlagenübersicht');
+  async function downloadCustomer(customerId, areaKey, locationId) {
+    return FileOut.save((await buildCustomer(customerId, areaKey, locationId)).output('blob'), customerFilename(customerId, areaKey, locationId), 'Anlagenübersicht');
   }
 
   return { build, buildCustomer, customerSystems, filename, download, downloadCustomer };
