@@ -1270,6 +1270,7 @@ function router() {
 }
 
 (async function init() {
+  Help.init();
   await Store.load();
   await Sync.init();
   Sync.onStatus(() => {

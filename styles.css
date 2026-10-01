@@ -255,3 +255,18 @@ table.data tr.total td { font-weight: 700; border-top: 2px solid var(--border); 
 .unit-refs .check { min-height: 36px; white-space: nowrap; flex-direction: row; width: auto; }
 .sub-legend { font-size: 0.95rem; margin: 14px 0 6px; color: var(--muted, #555); }
 .sub-legend:first-of-type { margin-top: 4px; }
+.help-btn { width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--muted); background: transparent; color: var(--text);
+  font-weight: 700; font-size: 1rem; cursor: pointer; margin-left: 4px; flex: 0 0 auto; }
+.help-btn:hover, .help-btn:focus-visible { background: var(--surface-2); }
+.help-card { max-width: 560px; }
+.help-card ul { margin: 0 0 12px; padding-left: 20px; }
+.help-card li { margin: 0 0 8px; line-height: 1.45; }
+.topnav { align-items: center; }
+@media (max-width: 480px) {
+  .topbar { gap: 6px; padding-left: 12px; padding-right: 12px; }
+  .topnav { gap: 0; }
+  .topnav a { padding: 6px 6px; }
+  .help-btn { width: 30px; height: 30px; }
+}
+.nav-short { display: none; }
+@media (max-width: 400px) { .nav-long { display: none; } .nav-short { display: inline; } }
