@@ -145,6 +145,62 @@ const PdfExport = (() => {
       .filter(Boolean).join(', ');
   }
 
+  // ---------- Firmenlogo ----------
+  const LOGO_W = 42; // Breite in mm (oben rechts auf der ersten Seite eines Berichts)
+  let logo = null; // { data, ratio } oder null
+
+  async function loadLogo() {
+    if (logo) return logo;
+    try {
+      const res = await fetch('icons/logo.jpg');
+      if (!res.ok) throw new Error(res.status);
+      const blob = await res.blob();
+      const data = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(blob);
+      });
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = reject;
+        i.src = data;
+      });
+      logo = { data, ratio: img.naturalHeight / img.naturalWidth };
+    } catch (err) {
+      console.warn('Logo nicht verfügbar', err);
+      logo = null;
+    }
+    return logo;
+  }
+
+  /** Titel + Untertitel links, Logo rechts; liefert die y-Position für den ersten Abschnitt. */
+  function titleBlock(doc, title, subtitle) {
+    const pw = doc.internal.pageSize.getWidth();
+    let textW = pw - 2 * M;
+    let logoBottom = 0;
+    if (logo) {
+      const h = LOGO_W * logo.ratio;
+      doc.addImage(logo.data, 'JPEG', pw - M - LOGO_W, 15, LOGO_W, h, 'firmenlogo', 'FAST');
+      textW -= LOGO_W + 6;
+      logoBottom = 15 + h;
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    const tLines = doc.splitTextToSize(title, textW);
+    doc.text(tLines, M, 24);
+    let y = 24 + (tLines.length - 1) * 6.5 + 6;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...GREY);
+    const sLines = doc.splitTextToSize(subtitle, textW);
+    doc.text(sLines, M, y);
+    doc.setTextColor(0);
+    y += (sLines.length - 1) * 4;
+    return Math.max(y, logoBottom) + 9;
+  }
+
   /** Neues PDF beginnen oder – im Sammel-PDF – eine neue Hochformat-Seite anhängen. */
   function startDoc(doc, title) {
     if (doc) {
@@ -200,15 +256,7 @@ const PdfExport = (() => {
     const doc = startDoc(target, `Anlagenbuch ${systemLabel(sys)}`);
     const pw = doc.internal.pageSize.getWidth();
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(area.pdfTitle.length > 42 ? 15 : 17);
-    doc.text(area.pdfTitle, M, 24);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(...GREY);
-    doc.text(area.pdfSubtitle, M, 30, { maxWidth: pw - 2 * M });
-    doc.setTextColor(0);
-    let y = sectionTitle(doc, 1, 'Anlagen-Stammdaten', 40);
+    let y = sectionTitle(doc, 1, 'Anlagen-Stammdaten', titleBlock(doc, area.pdfTitle, area.pdfSubtitle));
 
     const label = (t) => ({ content: t, styles: { fillColor: LABEL_BG, fontStyle: 'bold', textColor: [60, 70, 85] } });
     const maint = FGas.nextMaintenance(sys, entries);
@@ -301,17 +349,8 @@ const PdfExport = (() => {
 
     // ---------- Blatt 1: Stammdaten + Pflichten ----------
     const pw = doc.internal.pageSize.getWidth();
-    let y = 24;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(17);
-    doc.text('Anlagenbuch / Logbuch für Kälteanlagen', M, y);
-    y += 6;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(...GREY);
-    doc.text('Aufzeichnungen gemäß Art. 7 der F-Gase-Verordnung (EU) 2024/573 – je Anlage ein Anlagenbuch führen.', M, y);
-    doc.setTextColor(0);
-    y += 10;
+    let y = titleBlock(doc, 'Anlagenbuch / Logbuch für Kälteanlagen',
+      'Aufzeichnungen gemäß Art. 7 der F-Gase-Verordnung (EU) 2024/573 – je Anlage ein Anlagenbuch führen.');
     y = sectionTitle(doc, 1, 'Anlagen-Stammdaten', y);
 
     const t = FGas.co2e(sys);
@@ -463,6 +502,7 @@ const PdfExport = (() => {
 
   /** Anlagenbuch einer Anlage (inkl. Fotos). */
   async function build(sysId) {
+    await loadLogo();
     const sys = Store.system(sysId);
     const photos = await Photos.load(Store.entriesOf(sysId));
     return finish(drawSystem(sys, null, photos), Store.get().settings);
@@ -481,28 +521,24 @@ const PdfExport = (() => {
     const loc = locationId ? Store.location(locationId) : null;
     const systems = customerSystems(customerId, areaKey, locationId);
     const photos = await Photos.load(systems.flatMap((s) => Store.entriesOf(s.id)));
+    await loadLogo();
     const doc = startDoc(null, `Anlagenübersicht ${cust.name}`);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(17);
-    doc.text('Anlagenübersicht', M, 24);
-    doc.setFont('helvetica', 'normal');
+    let top = titleBlock(doc, 'Anlagenübersicht',
+      `${areaKey ? Areas.get(areaKey).label : 'Alle Bereiche'} · Stand ${fmtDate(todayISO())} · ${systems.length} ${systems.length === 1 ? 'Anlage' : 'Anlagen'}`) - 3;
     doc.setFontSize(10);
-    doc.text(betreiberText(cust), M, 31, { maxWidth: 180 });
-    let top = 37;
-    if (loc) {
+    const labelled = (label, text) => {
       doc.setFont('helvetica', 'bold');
-      doc.text('Standort: ', M, top);
+      doc.text(label, M, top);
+      const lw = doc.getTextWidth(label + ' ') + 1; // Breite in fetter Schrift messen
       doc.setFont('helvetica', 'normal');
-      doc.text(locationText(loc), M + doc.getTextWidth('Standort: '), top, { maxWidth: 160 });
+      doc.text(text, M + lw, top, { maxWidth: 180 - lw });
       top += 6;
-    }
-    doc.setFontSize(9);
-    doc.setTextColor(...GREY);
-    doc.text(`${areaKey ? Areas.get(areaKey).label : 'Alle Bereiche'} · Stand ${fmtDate(todayISO())} · ${systems.length} ${systems.length === 1 ? 'Anlage' : 'Anlagen'}`, M, top);
-    doc.setTextColor(0);
+    };
+    labelled('Betreiber:', betreiberText(cust));
+    if (loc) labelled('Standort:', locationText(loc));
     const dueText = (d) => (d ? (d.date ? fmtDate(d.date) : 'offen') : '–');
     doc.autoTable({
-      startY: top + 7,
+      startY: top + 2,
       margin: { left: M, right: M, bottom: 24 },
       theme: 'grid',
       head: [['Anlagen-Nr.', 'Bezeichnung', 'Bereich', 'Standort', 'Nächste Wartung', 'Nächste Dichtheitskontr.']],

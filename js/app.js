@@ -105,6 +105,7 @@ function worstBadge(systems) {
 function viewAreas() {
   const st = Store.get();
   render(`
+    <img class="company-logo" src="icons/logo.jpg" alt="Moritz Herrmann Heizung &amp; Klima">
     <h1>Bereich wählen</h1>
     <p class="muted">Kunden und Standorte sind in allen Bereichen gleich – die Anlagen gehören jeweils zu einem Bereich.</p>
     <div class="area-grid">${Areas.keys.map((k) => {
@@ -909,6 +910,7 @@ function viewLogin() {
   const setup = Sync.needsSetup;
   render(`
     <form id="f" class="card login-card">
+      <img class="company-logo" src="icons/logo.jpg" alt="Firmenlogo">
       <h1>${setup ? 'Ersten Administrator anlegen' : 'Anmelden'}</h1>
       <p class="muted small">${setup
         ? 'Auf diesem Server gibt es noch keine Benutzer. Lege jetzt deinen Administrator-Zugang an – damit kannst du danach weitere Benutzer anlegen.'
