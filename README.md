@@ -36,6 +36,12 @@ mit Unterschrift und eine eigene PDF-Ausgabe.
   Nachkontrolle am, Fachbetrieb/Techniker + Zertifikat-Nr., Bemerkung
 - **Digitale Unterschrift** von Techniker und (optional) Betreiber per Finger/Stift/Maus.
   Unterschriebene Einträge sind gesperrt.
+- **Fotos zu Einträgen** (Kamera oder Galerie, automatisch verkleinert, bis 12 je Eintrag) –
+  in der App mit Großansicht, im PDF auf eigenen Fotoseiten
+- **Kältemittel-Bilanz** je Anlage und Jahr: zugefügt (nach Herkunft neu/recycelt/aufgearbeitet),
+  entnommen und Nachfüllrate bezogen auf die Füllmenge – in der App und im PDF
+- **Sammel-PDF je Kunde** (aktueller Bereich oder alle Bereiche) mit Anlagenübersicht auf Blatt 1
+- **Termine exportieren** je Bereich: Excel (CSV) und Kalender (.ics, mit Erinnerung 7 Tage vorher)
 - **PDF-Ausgabe** je Anlage im Layout der Vorlage (Blatt 1 Stammdaten + Pflichten,
   ab Blatt 2 chronologische Einträge mit Unterschriften)
 - **Fälligkeiten**: nächste Wartung (einstellbares Wartungsintervall je Anlage, Standard 12 Monate)

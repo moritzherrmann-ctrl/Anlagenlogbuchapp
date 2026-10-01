@@ -6,6 +6,7 @@ const Store = (() => {
   const OBJ = 'kv';
   const KEY = 'state';
   const LS_KEY = 'anlagenbuch.state';
+  const PHOTOS = 'photos'; // Fotos getrennt von den übrigen Daten (sonst würde jedes Speichern alle Bilder mitschreiben)
 
   const DEFAULT_SETTINGS = {
     firma: 'Moritz Herrmann Heizung und Klima',
@@ -22,22 +23,26 @@ const Store = (() => {
   let state = emptyState();
 
   function emptyState() {
-    return { version: 2, settings: { ...DEFAULT_SETTINGS }, customers: [], locations: [], systems: [], entries: [], nummernJeBereich: true, pending: {}, syncSeq: 0 };
+    return { version: 2, settings: { ...DEFAULT_SETTINGS }, customers: [], locations: [], systems: [], entries: [], nummernJeBereich: true, pending: {}, pendingPhotos: {}, syncSeq: 0 };
   }
 
   function openDb() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = () => req.result.createObjectStore(OBJ);
+      const req = indexedDB.open(DB_NAME, 2);
+      req.onupgradeneeded = () => {
+        const d = req.result;
+        if (!d.objectStoreNames.contains(OBJ)) d.createObjectStore(OBJ);
+        if (!d.objectStoreNames.contains(PHOTOS)) d.createObjectStore(PHOTOS);
+      };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
   }
 
-  function idb(mode, fn) {
+  function idb(mode, fn, store = OBJ) {
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(OBJ, mode);
-      const req = fn(tx.objectStore(OBJ));
+      const tx = db.transaction(store, mode);
+      const req = fn(tx.objectStore(store));
       tx.oncomplete = () => resolve(req && req.result);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
@@ -56,6 +61,7 @@ const Store = (() => {
       entries: Array.isArray(s.entries) ? s.entries : [],
       nummernJeBereich: !!s.nummernJeBereich,
       pending: s.pending && typeof s.pending === 'object' ? s.pending : {},
+      pendingPhotos: s.pendingPhotos && typeof s.pendingPhotos === 'object' ? s.pendingPhotos : {},
       syncSeq: Number(s.syncSeq) || 0,
     });
   }
@@ -124,6 +130,52 @@ const Store = (() => {
   function markAllDirty() {
     for (const coll of COLLS) for (const r of state[coll]) markDirty(coll, r.id);
     markDirty('settings', SETTINGS_ID);
+    for (const id of allPhotoIds()) state.pendingPhotos[id] = true;
+  }
+
+  // --- Fotos (eigener Speicherbereich, Abgleich als einzelne Dateien) ---
+  const memPhotos = new Map(); // nur falls IndexedDB fehlt (Fotos überdauern dann keinen Neustart)
+  const PHOTO_RE = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
+
+  const allPhotoIds = () => state.entries.flatMap((e) => (Array.isArray(e.fotos) ? e.fotos.map((f) => f.id) : []));
+
+  async function getPhoto(id) {
+    if (!db) return memPhotos.get(id) || null;
+    return (await idb('readonly', (os) => os.get(id), PHOTOS)) || null;
+  }
+
+  /** Foto speichern; eigene Aufnahmen werden zum Hochladen vorgemerkt, vom Server geladene nicht. */
+  async function putPhoto(id, data, { remote = false } = {}) {
+    if (!PHOTO_RE.test(data || '')) throw new Error('Ungültiges Foto');
+    if (db) await idb('readwrite', (os) => os.put(data, id), PHOTOS); else memPhotos.set(id, data);
+    if (!remote) {
+      state.pendingPhotos[id] = true;
+      await save();
+    }
+  }
+
+  function photoUploaded(id) {
+    delete state.pendingPhotos[id];
+    return save({ silent: true });
+  }
+
+  /** Alle Fotos (für die Sicherungsdatei). */
+  async function exportPhotos() {
+    const out = {};
+    for (const id of allPhotoIds()) {
+      const data = await getPhoto(id);
+      if (data) out[id] = data;
+    }
+    return out;
+  }
+
+  async function importPhotos(photos) {
+    if (!photos || typeof photos !== 'object') return;
+    for (const [id, data] of Object.entries(photos)) {
+      if (!PHOTO_RE.test(data || '')) continue;
+      if (db) await idb('readwrite', (os) => os.put(data, id), PHOTOS); else memPhotos.set(id, data);
+      state.pendingPhotos[id] = true;
+    }
   }
 
   /** Datensatz geändert (z. B. Unterschrift entfernt): Zeitstempel setzen und zum Abgleich vormerken. */
@@ -208,17 +260,19 @@ const Store = (() => {
 
   const get = () => state;
   /** Sicherung einspielen: ersetzt alle Daten und merkt sie zum Hochladen vor. */
-  function replace(s) {
+  async function replace(s) {
     const syncSeq = state.syncSeq;
     state = normalize(s);
     state.syncSeq = syncSeq;
     state.pending = {};
+    state.pendingPhotos = {};
+    await importPhotos(s.photos);
     markAllDirty();
     return save();
   }
 
   /** Server-Betrieb: fehlende Datensätze aus einer Sicherung wiederherstellen, vorhandene bleiben unverändert. */
-  function restoreMissing(s) {
+  async function restoreMissing(s) {
     const src = normalize(s);
     const now = new Date().toISOString();
     // Bei alten Sicherungen ohne Standorte legt die Umstellung neue Standorte an – diese nur übernehmen,
@@ -234,6 +288,10 @@ const Store = (() => {
         markDirty(coll, r.id);
         restored++;
       }
+    }
+    if (s.photos) {
+      const have = new Set(allPhotoIds());
+      await importPhotos(Object.fromEntries(Object.entries(s.photos).filter(([id]) => have.has(id))));
     }
     return save().then(() => restored);
   }
@@ -373,7 +431,7 @@ const Store = (() => {
   }
 
   return {
-    load, save, get, replace, restoreMissing, uid, onChange, touch, saveSettings, markAllDirty, pendingChanges, clearPending, applyRemote, resetForServer, customer, location, locationsOf, system, entry, systemsOf, systemsAt, entriesOf,
+    load, save, get, replace, restoreMissing, uid, getPhoto, putPhoto, photoUploaded, exportPhotos, onChange, touch, saveSettings, markAllDirty, pendingChanges, clearPending, applyRemote, resetForServer, customer, location, locationsOf, system, entry, systemsOf, systemsAt, entriesOf,
     upsert, nextSystemNumber, noteSystemNumber, removeCustomer, removeLocation, removeSystem, removeEntry, DEFAULT_SETTINGS,
   };
 })();
@@ -547,6 +605,33 @@ const FGas = (() => {
     return items.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
   }
 
+  /** Kältemittel-Bilanz je Jahr: zugefügt (nach Herkunft), entnommen, Nachfüllrate bezogen auf die Füllmenge. */
+  function balance(sys, entries) {
+    const years = new Map();
+    const row = (y) => {
+      if (!years.has(y)) years.set(y, { year: y, neu: 0, recycelt: 0, aufgearbeitet: 0, unbekannt: 0, zugefuegt: 0, entnommen: 0 });
+      return years.get(y);
+    };
+    for (const e of entries) {
+      const add = num(e.mengeZugefuegt) || 0;
+      const rem = num(e.mengeEntnommen) || 0;
+      if (!add && !rem) continue;
+      const r = row(/^\d{4}/.test(e.datum || '') ? e.datum.slice(0, 4) : 'ohne Datum');
+      r.zugefuegt += add;
+      r[HERKUNFT.includes(e.herkunft) ? e.herkunft : 'unbekannt'] += add;
+      r.entnommen += rem;
+    }
+    const rows = [...years.values()].sort((a, b) => a.year.localeCompare(b.year));
+    const total = rows.reduce((t, r) => {
+      for (const k of ['neu', 'recycelt', 'aufgearbeitet', 'unbekannt', 'zugefuegt', 'entnommen']) t[k] += r[k];
+      return t;
+    }, { year: 'Gesamt', neu: 0, recycelt: 0, aufgearbeitet: 0, unbekannt: 0, zugefuegt: 0, entnommen: 0 });
+    const fill = num(sys.fuellmenge);
+    const rate = (r) => (isFinite(fill) && fill > 0 && r.zugefuegt ? (r.zugefuegt / fill) * 100 : null);
+    for (const r of rows) r.rate = rate(r);
+    return { rows, total };
+  }
+
   function dueStatus(due) {
     if (!due) return { cls: '', text: 'keine Prüfpflicht' };
     if (!due.date) return { cls: 'warn', text: 'Termin offen' };
@@ -558,7 +643,7 @@ const FGas = (() => {
 
   return {
     REFRIGERANTS, TAETIGKEITEN, HERKUNFT, ERGEBNIS, num, co2e, autoInterval, interval, intervalLabel, addMonths,
-    nextDue, maintInterval, nextMaintenance, dueItems, dueStatus, fixGwp,
+    nextDue, maintInterval, nextMaintenance, dueItems, dueStatus, fixGwp, balance,
   };
 })();
 

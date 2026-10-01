@@ -158,7 +158,8 @@ const Generic = (() => {
             <div class="title">${fmtDate(e.datum)} · ${esc(e.taetigkeit)}</div>
             <div class="sub">${esc([e.ergebnis, (e.arbeiten || []).length ? `${e.arbeiten.length} Arbeiten` : '', e.techniker].filter(Boolean).join(' · '))}</div>
             <div class="entry-meta">${e.sigTechniker ? '<span class="badge ok">✓ unterschrieben</span>' : '<span class="badge warn">nicht unterschrieben</span>'}
-              ${/Mängel festgestellt/.test(e.ergebnis || '') ? '<span class="badge danger">Mängel</span>' : ''}</div>
+              ${/Mängel festgestellt/.test(e.ergebnis || '') ? '<span class="badge danger">Mängel</span>' : ''}
+              ${(e.fotos || []).length ? `<span class="badge">📷 ${e.fotos.length}</span>` : ''}</div>
           </div><span class="chev">›</span></a></li>`).join('')}</ul>`
       : '<div class="empty">Noch keine Einträge. Lege die erste Wartung/Inspektion an.</div>'}
     `);
@@ -217,6 +218,7 @@ const Generic = (() => {
             ${field('maengel', 'Mängel / Empfehlungen', v.maengel, { type: 'textarea', full: true })}
           </div>
         </fieldset>
+        ${Photos.editorHtml()}
         <fieldset class="card">
           <legend>Ausführung</legend>
           <div class="grid">
@@ -234,9 +236,12 @@ const Generic = (() => {
       </form>
     `);
     const f = document.getElementById('f');
+    const photos = Photos.bindEditor(v.fotos);
     f.addEventListener('submit', async (ev) => {
       ev.preventDefault();
+      if (photos.busy) { alert('Bitte warten, bis alle Fotos verarbeitet sind.'); return; }
       const d = formData(f);
+      d.fotos = photos.list;
       const extra = (d.weitereArbeiten || '').split('\n').map((x) => x.trim()).filter(Boolean);
       delete d.weitereArbeiten;
       d.arbeiten = [...[...f.querySelectorAll('[data-arbeit]:checked')].map((x) => x.value), ...extra];

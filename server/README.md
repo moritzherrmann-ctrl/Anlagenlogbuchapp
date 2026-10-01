@@ -49,6 +49,7 @@ Einstellungen über Umgebungsvariablen:
 ## Daten & Sicherung
 
 - Alle Daten liegen in `db.json` im Datenverzeichnis (bei Docker im Volume `anlagenbuch-daten`).
+- Fotos liegen als einzelne JPEG-Dateien unter `photos/` im Datenverzeichnis.
 - Der Server legt täglich eine Sicherung unter `backups/` an und behält die letzten 60 Tage.
 - Zusätzlich empfiehlt sich eine Sicherung des Datenverzeichnisses auf ein anderes Medium.
 - Docker-Volume sichern: `docker run --rm -v anlagenbuchapp_anlagenbuch-daten:/data -v "$PWD":/b alpine tar czf /b/anlagenbuch-sicherung.tgz -C /data .`

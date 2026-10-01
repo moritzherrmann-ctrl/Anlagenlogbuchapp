@@ -21,6 +21,8 @@ const APP_DIR = path.resolve(__dirname, '..');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const PHOTO_DIR = path.join(DATA_DIR, 'photos');
+const MAX_PHOTO = 8 * 1024 * 1024;
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const COLLECTIONS = ['customers', 'locations', 'systems', 'entries', 'settings'];
 const SESSION_DAYS = 90;
@@ -34,6 +36,7 @@ let db = { seq: 0, users: [], sessions: {}, records: {} };
 
 function loadDb() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  fs.mkdirSync(PHOTO_DIR, { recursive: true });
   if (fs.existsSync(DB_FILE)) db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   for (const c of COLLECTIONS) db.records[c] = db.records[c] || {};
   db.users = db.users || [];
@@ -245,6 +248,30 @@ async function api(req, res, url) {
     }
     if (accepted) saveDb();
     return send(res, 200, { accepted, seq: db.seq });
+  }
+
+  // --- Fotos: je Foto eine JPEG-Datei, unveränderlich ---
+  if (url.pathname.startsWith('/api/photos/')) {
+    let id = '';
+    try { id = decodeURIComponent(url.pathname.slice('/api/photos/'.length)); } catch { /* unten abgelehnt */ }
+    if (!VALID_ID.test(id)) throw httpError(400, 'Ungültige Foto-ID.');
+    const file = path.join(PHOTO_DIR, id + '.jpg');
+    if (req.method === 'GET') {
+      if (!fs.existsSync(file)) throw httpError(404, 'Foto nicht gefunden.');
+      return send(res, 200, { data: 'data:image/jpeg;base64,' + fs.readFileSync(file).toString('base64') });
+    }
+    if (req.method === 'PUT') {
+      const { data } = await readJson(req);
+      const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(data || ''));
+      const buf = m ? Buffer.from(m[1], 'base64') : null;
+      if (!buf || buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) throw httpError(400, 'Kein gültiges JPEG-Foto.');
+      if (buf.length > MAX_PHOTO) throw httpError(413, 'Foto zu groß.');
+      if (!fs.existsSync(file)) {
+        fs.writeFileSync(file + '.tmp', buf);
+        fs.renameSync(file + '.tmp', file);
+      }
+      return send(res, 200, { ok: true });
+    }
   }
 
   // --- Benutzerverwaltung (nur Administratoren) ---

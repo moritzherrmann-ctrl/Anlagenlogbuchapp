@@ -170,12 +170,30 @@ const Sync = (() => {
       try {
         do {
           again = false;
+          // Fotos zuerst (einzeln), damit Einträge auf dem Server nie auf fehlende Bilder zeigen
+          for (const id of Object.keys(Store.get().pendingPhotos || {})) {
+            const data = await Store.getPhoto(id);
+            if (data) await request('api/photos/' + encodeURIComponent(id), { method: 'PUT', body: { data } });
+            await Store.photoUploaded(id);
+          }
+          // Datensätze in Paketen (max. 200 Stück bzw. ca. 4 MB)
           const sent = Store.pendingChanges();
-          for (let i = 0; i < sent.length; i += 200) {
-            const chunk = sent.slice(i, i + 200);
+          let chunk = [];
+          let size = 0;
+          const flush = async () => {
+            if (!chunk.length) return;
             await request('api/sync', { method: 'POST', body: { changes: chunk.map(({ coll, rec }) => ({ coll, rec })) } });
             await Store.clearPending(chunk);
+            chunk = [];
+            size = 0;
+          };
+          for (const c of sent) {
+            const n = JSON.stringify(c.rec).length;
+            if (chunk.length && (chunk.length >= 200 || size + n > 4e6)) await flush();
+            chunk.push(c);
+            size += n;
           }
+          await flush();
           const d = await request('api/sync?since=' + (Store.get().syncSeq || 0));
           const changed = await Store.applyRemote(d.changes, d.seq);
           if (changed) dataListeners.forEach((fn) => fn());
@@ -220,10 +238,11 @@ const Sync = (() => {
     create: (u) => request('api/users', { method: 'POST', body: u }).then((d) => d.user),
     update: (id, u) => request('api/users/' + id, { method: 'PUT', body: u }).then((d) => d.user),
   };
+  const fetchPhoto = (id) => request('api/photos/' + encodeURIComponent(id)).then((d) => d.data);
   const changePassword = (oldPassword, newPassword) => request('api/password', { method: 'POST', body: { oldPassword, newPassword } });
 
   return {
-    init, login, setup, logout, setServer, run, users, changePassword,
+    init, login, setup, logout, setServer, run, users, changePassword, fetchPhoto,
     onStatus: (fn) => statusListeners.push(fn),
     onData: (fn) => dataListeners.push(fn),
     get enabled() { return !!base; },
@@ -236,6 +255,6 @@ const Sync = (() => {
     get status() { return status; },
     get lastError() { return lastError; },
     get lastSync() { return lastSync; },
-    get pendingCount() { return Object.keys(Store.get().pending || {}).length; },
+    get pendingCount() { return Object.keys(Store.get().pending || {}).length + Object.keys(Store.get().pendingPhotos || {}).length; },
   };
 })();

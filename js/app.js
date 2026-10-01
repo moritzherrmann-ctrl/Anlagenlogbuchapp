@@ -189,6 +189,11 @@ function viewHome(q) {
       emptyText: 'Keine anstehenden Wartungen. Termine entstehen aus dem Wartungsintervall der Anlagen und den eingetragenen Wartungen.',
       openText: 'noch keine Wartung und kein Inbetriebnahme-Datum erfasst',
     })}
+    <div class="actions" style="margin-top:0">
+      <span class="muted small">Termine exportieren:</span>
+      <button class="btn small" id="expCsv">Excel (CSV)</button>
+      <button class="btn small" id="expIcs">Kalender (.ics)</button>
+    </div>
 
     <div class="head-row" style="margin-top:24px">
       <h1>Kunden</h1>
@@ -207,6 +212,16 @@ function viewHome(q) {
     }).join('')}</ul>`
     : `<div class="empty">${term ? 'Keine Treffer.' : 'Noch keine Kunden angelegt.<br><br><a class="btn primary" href="#/kunde/neu">+ Ersten Kunden anlegen</a>'}</div>`}
   `);
+  const exportDue = async (kind) => {
+    try {
+      const { blob, name } = kind === 'csv' ? DueExport.csv(area.key) : DueExport.ics(area.key);
+      await FileOut.save(blob, name, 'Termine');
+    } catch (err) {
+      if (!/cancel/i.test(err.message)) alert('Export fehlgeschlagen: ' + err.message);
+    }
+  };
+  document.getElementById('expCsv').addEventListener('click', () => exportDue('csv'));
+  document.getElementById('expIcs').addEventListener('click', () => exportDue('ics'));
   const s = document.getElementById('search');
   s.addEventListener('input', () => {
     const qs = new URLSearchParams({ q: s.value });
@@ -278,6 +293,9 @@ function viewCustomer(id) {
   const c = Store.customer(id);
   if (!c) return notFound();
   const locations = Store.locationsOf(id);
+  const area = Areas.get(Areas.current);
+  const allSystems = PdfExport.customerSystems(id, null);
+  const areaSystems = PdfExport.customerSystems(id, area.key);
   render(`
     ${crumbs()}
     <div class="head-row">
@@ -293,6 +311,10 @@ function viewCustomer(id) {
         ${c.email ? `<dt>E-Mail</dt><dd><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></dd>` : ''}
         ${c.notizen ? `<dt>Notizen</dt><dd>${esc(c.notizen)}</dd>` : ''}
       </dl>
+      ${allSystems.length ? `<div class="actions">
+        ${areaSystems.length ? `<button class="btn" data-bundle="${area.key}">Sammel-PDF ${esc(area.short)} (${areaSystems.length})</button>` : ''}
+        ${allSystems.length > areaSystems.length ? `<button class="btn" data-bundle="">Sammel-PDF alle Bereiche (${allSystems.length})</button>` : ''}
+      </div>` : ''}
     </div>
     <div class="head-row">
       <h2 style="margin:8px 0 0;flex:1">Standorte</h2>
@@ -308,6 +330,20 @@ function viewCustomer(id) {
     }).join('')}</ul>`
     : `<div class="empty">Für diesen Kunden ist noch kein Standort angelegt.<br>Lege zuerst einen Standort an – dort kannst du dann die Anlagen anlegen.</div>`}
   `);
+  main.querySelectorAll('[data-bundle]').forEach((b) => b.addEventListener('click', async () => {
+    const label = b.textContent;
+    b.disabled = true;
+    b.textContent = 'PDF wird erstellt …';
+    try {
+      await PdfExport.downloadCustomer(id, b.dataset.bundle || null);
+    } catch (err) {
+      console.error(err);
+      if (!/cancel/i.test(err.message)) alert('PDF konnte nicht erstellt werden: ' + err.message);
+    } finally {
+      b.disabled = false;
+      b.textContent = label;
+    }
+  }));
 }
 
 // ---------- Standort anlegen / bearbeiten ----------
@@ -543,8 +579,7 @@ function viewSystem(id) {
   const maint = FGas.nextMaintenance(s, entries);
   const maintSt = FGas.dueStatus(maint);
   const alerts = [[due, dueSt], [maint, maintSt]].filter(([d, st]) => d && (st.cls === 'danger' || st.cls === 'warn'));
-  const sumAdd = entries.reduce((a, e) => a + (FGas.num(e.mengeZugefuegt) || 0), 0);
-  const sumRem = entries.reduce((a, e) => a + (FGas.num(e.mengeEntnommen) || 0), 0);
+  const bal = FGas.balance(s, entries);
   render(`
     ${crumbs({ c, l })}
     <div class="head-row">
@@ -567,13 +602,13 @@ function viewSystem(id) {
         <dt>Wartungsintervall</dt><dd>${FGas.maintInterval(s) ? 'alle ' + FGas.maintInterval(s) + ' Monate' : 'keine regelmäßige Wartung'}</dd>
         <dt>Nächste Wartung</dt><dd><span class="badge ${maint ? maintSt.cls : ''}">${esc(maint ? maintSt.text : '–')}</span></dd>
         <dt>Errichtet</dt><dd>${esc([fmtDate(s.errichtetAm), s.errichtetDurch].filter(Boolean).join(' · ')) || '–'}</dd>
-        ${entries.length ? `<dt>Summe zugefügt / entnommen</dt><dd>${fmtNum(sumAdd, 3)} kg / ${fmtNum(sumRem, 3)} kg</dd>` : ''}
       </dl>
       <div class="actions">
         <button class="btn" id="pdf">${FileOut.isNative() ? 'PDF speichern / teilen' : 'PDF herunterladen'}</button>
         ${FileOut.canShareFiles() && !FileOut.isNative() ? '<button class="btn" id="share">PDF teilen</button>' : ''}
       </div>
     </div>
+    ${balanceCard(bal)}
     <div class="head-row">
       <h2 style="margin:8px 0 0;flex:1">Einträge / Prüfungen</h2>
       <a class="btn primary" href="#/eintrag/neu?anlage=${id}">+ Neuer Eintrag</a>
@@ -589,7 +624,8 @@ function viewSystem(id) {
             e.techniker,
           ].filter(Boolean).join(' · '))}</div>
           <div class="entry-meta">${e.sigTechniker ? '<span class="badge ok">✓ unterschrieben</span>' : '<span class="badge warn">nicht unterschrieben</span>'}
-            ${e.ergebnis === 'Leckage' ? '<span class="badge danger">Leckage</span>' : ''}</div>
+            ${e.ergebnis === 'Leckage' ? '<span class="badge danger">Leckage</span>' : ''}
+            ${(e.fotos || []).length ? `<span class="badge">📷 ${e.fotos.length}</span>` : ''}</div>
         </div><span class="chev">›</span></a></li>`).join('')}</ul>`
     : `<div class="empty">Noch keine Einträge. Lege die erste Prüfung/Tätigkeit an.</div>`}
   `);
@@ -608,11 +644,30 @@ function bindPdfButtons(id, s) {
   const share = document.getElementById('share');
   if (share) share.addEventListener('click', async () => {
     try {
-      await FileOut.share(PdfExport.build(id).output('blob'), PdfExport.filename(id), 'Anlagenbuch ' + systemTitle(s));
+      await FileOut.share((await PdfExport.build(id)).output('blob'), PdfExport.filename(id), 'Anlagenbuch ' + systemTitle(s));
     } catch (err) {
       if (err.name !== 'AbortError') alert('Teilen fehlgeschlagen: ' + err.message);
     }
   });
+}
+
+/** Kältemittel-Bilanz je Jahr als Tabelle. */
+function balanceCard(bal) {
+  if (!bal.rows.length) return '';
+  const kg = (v) => (v ? fmtNum(v, 3) : '–');
+  const line = (r, cls = '') => `<tr class="${cls}">
+    <td>${esc(r.year)}</td><td>${kg(r.zugefuegt)}</td><td>${kg(r.entnommen)}</td>
+    <td>${r.rate === null || r.rate === undefined ? '–' : fmtNum(r.rate, 1) + ' %'}</td>
+    <td>${kg(r.neu)}</td><td>${kg(r.recycelt)}</td><td>${kg(r.aufgearbeitet)}</td></tr>`;
+  return `<div class="card">
+    <h3>Kältemittel-Bilanz</h3>
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Jahr</th><th>zugefügt kg</th><th>entnommen kg</th><th>Nachfüllrate*</th><th>davon neu</th><th>recycelt</th><th>aufgearb.</th></tr></thead>
+      <tbody>${bal.rows.map((r) => line(r)).join('')}${bal.rows.length > 1 ? line(bal.total, 'total') : ''}</tbody>
+    </table></div>
+    <p class="muted small" style="margin:8px 0 0">* zugefügte Menge im Jahr bezogen auf die Füllmenge der Anlage (Hinweis auf Leckageverluste).
+      ${bal.total.unbekannt ? ` ${fmtNum(bal.total.unbekannt, 3)} kg ohne Herkunftsangabe.` : ''}</p>
+  </div>`;
 }
 
 // ---------- Eintrag anlegen / bearbeiten ----------
@@ -661,6 +716,7 @@ function viewEntryForm(id, q) {
           ${field('nachkontrolleAm', 'Nachkontrolle am', v.nachkontrolleAm, { type: 'date', hint: 'Pflicht innerhalb eines Monats nach Reparatur' })}
         </div>
       </fieldset>
+      ${Photos.editorHtml()}
       <fieldset class="card">
         <legend>Ausführung</legend>
         <div class="grid">
@@ -679,6 +735,7 @@ function viewEntryForm(id, q) {
     </form>
   `);
   const f = document.getElementById('f');
+  const photos = Photos.bindEditor(v.fotos);
   const toggleLeak = () => {
     const show = f.ergebnis.value === 'Leckage' || f.taetigkeit.value === 'Reparatur' || f.leckageUrsache.value;
     document.getElementById('leakBox').hidden = !show;
@@ -698,6 +755,8 @@ function viewEntryForm(id, q) {
       f.herkunft.focus();
       return;
     }
+    if (photos.busy) { alert('Bitte warten, bis alle Fotos verarbeitet sind.'); return; }
+    d.fotos = photos.list;
     const saved = await Store.upsert('entries', { ...d, id: id || undefined, systemId: s.id });
     toast('Eintrag gespeichert');
     go('#/eintrag/' + saved.id);
@@ -754,6 +813,7 @@ function viewEntry(id) {
         ${row('Bemerkung', e.bemerkung)}` : Generic.entryRows(e, s)}
       </dl>
     </div>
+    ${Photos.galleryHtml(e.fotos)}
     <h2>Unterschriften</h2>
     <div class="sig-grid">${sigBox(e, 'techniker')}${sigBox(e, 'kunde')}</div>
     <div class="actions">
@@ -762,6 +822,7 @@ function viewEntry(id) {
       <a class="btn primary" href="#/anlage/${s.id}">Fertig – zur Anlage</a>
     </div>
   `);
+  Photos.bindGallery();
   main.querySelectorAll('[data-sign]').forEach((b) => b.addEventListener('click', () => {
     const role = b.dataset.sign;
     const settings = Store.get().settings;
@@ -1076,7 +1137,7 @@ function viewSettings() {
     toast('Einstellungen gespeichert');
   });
   document.getElementById('exp').addEventListener('click', async () => {
-    const blob = new Blob([JSON.stringify(Store.get(), null, 1)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ ...Store.get(), photos: await Store.exportPhotos() })], { type: 'application/json' });
     try {
       await FileOut.save(blob, `Anlagenbuch_Sicherung_${today()}.json`, 'Anlagenbuch-Sicherung');
     } catch (err) {

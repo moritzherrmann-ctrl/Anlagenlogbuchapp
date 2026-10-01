@@ -145,16 +145,59 @@ const PdfExport = (() => {
       .filter(Boolean).join(', ');
   }
 
-  /** Anlagenbuch für Heizungs- und Trinkwasseranlagen (Felder aus der Bereichs-Definition). */
-  function buildGeneric(sys) {
+  /** Neues PDF beginnen oder – im Sammel-PDF – eine neue Hochformat-Seite anhängen. */
+  function startDoc(doc, title) {
+    if (doc) {
+      doc.addPage('a4', 'portrait');
+      return doc;
+    }
     const { jsPDF } = window.jspdf;
-    const settings = Store.get().settings;
+    doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    doc.setProperties({ title, author: Store.get().settings.firma, creator: 'Anlagenbuch-App' });
+    return doc;
+  }
+
+  /** Fotos der Einträge auf eigenen Seiten (2 × 3 je Seite) mit Datum und Tätigkeit. */
+  function photoPages(doc, no, sys, entries, photos) {
+    const items = entries.flatMap((e) => (e.fotos || []).map((f, i, all) => ({ e, f, i, n: all.length }))).filter((x) => photos.has(x.f.id));
+    if (!items.length) return;
+    const pw = 210;
+    const colW = (pw - 2 * M - 6) / 2;
+    const boxH = 68;
+    const rowH = boxH + 12;
+    let y = 0;
+    let col = 0;
+    const newPage = () => {
+      doc.addPage('a4', 'portrait');
+      y = sectionTitle(doc, no, `Fotos – ${systemLabel(sys)}`, 22) + 2;
+      col = 0;
+    };
+    newPage();
+    for (const { e, f, i, n } of items) {
+      if (col === 2) { col = 0; y += rowH; }
+      if (y + rowH > 297 - 22) newPage();
+      const x = M + col * (colW + 6);
+      const ratio = Math.min(colW / (f.w || 4), boxH / (f.h || 3));
+      const w = (f.w || 4) * ratio;
+      const h = (f.h || 3) * ratio;
+      try { doc.addImage(photos.get(f.id), 'JPEG', x + (colW - w) / 2, y + (boxH - h) / 2, w, h, f.id, 'FAST'); } catch (err) { console.warn(err); }
+      doc.setDrawColor(...LINE);
+      doc.rect(x, y, colW, boxH);
+      doc.setFontSize(8);
+      doc.setTextColor(...GREY);
+      doc.text(`${fmtDate(e.datum)} · ${e.taetigkeit || ''} – Foto ${i + 1}/${n}`, x, y + boxH + 4.5, { maxWidth: colW });
+      doc.setTextColor(0);
+      col++;
+    }
+  }
+
+  /** Anlagenbuch für Heizungs- und Trinkwasseranlagen (Felder aus der Bereichs-Definition). */
+  function drawGeneric(sys, target, photos) {
     const area = Areas.get(Areas.of(sys));
     const cust = Store.customer(sys.customerId);
     const standort = locationText(Store.location(sys.locationId), sys);
     const entries = Store.entriesOf(sys.id);
-    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    doc.setProperties({ title: `Anlagenbuch ${systemLabel(sys)}`, author: settings.firma, creator: 'Anlagenbuch-App' });
+    const doc = startDoc(target, `Anlagenbuch ${systemLabel(sys)}`);
     const pw = doc.internal.pageSize.getWidth();
 
     doc.setFont('helvetica', 'bold');
@@ -244,21 +287,17 @@ const PdfExport = (() => {
       },
     });
     footnote(doc, '* Tätigkeit: ' + area.taetigkeiten.join(' · ') + '.');
-    return finish(doc, settings);
+    photoPages(doc, 4, sys, entries, photos);
+    return doc;
   }
 
-  function build(sysId) {
-    const { jsPDF } = window.jspdf;
-    const st = Store.get();
-    const settings = st.settings;
-    const sys = Store.system(sysId);
-    if (!Areas.isKaelte(sys)) return buildGeneric(sys);
+  /** Anlagenbuch Kälte im Layout der Vorlage. */
+  function drawKaelte(sys, target, photos) {
     const cust = Store.customer(sys.customerId);
     const loc = Store.location(sys.locationId);
     const standort = locationText(loc, sys);
-    const entries = Store.entriesOf(sysId);
-    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    doc.setProperties({ title: `Anlagenbuch ${systemLabel(sys)}`, author: settings.firma, creator: 'Anlagenbuch-App' });
+    const entries = Store.entriesOf(sys.id);
+    const doc = startDoc(target, `Anlagenbuch ${systemLabel(sys)}`);
 
     // ---------- Blatt 1: Stammdaten + Pflichten ----------
     const pw = doc.internal.pageSize.getWidth();
@@ -324,12 +363,42 @@ const PdfExport = (() => {
     y = richParagraph(doc, 'Aufzeichnungspflicht:', 'Für Anlagen mit Dichtheitskontrollpflicht sind Menge und Typ des Kältemittels, zugefügte und rückgewonnene Mengen (inkl. Herkunft: neu, recycelt oder aufgearbeitet), Ergebnisse der Dichtheitskontrollen, Leckage-Ursachen und die Identität des ausführenden zertifizierten Unternehmens/Personals zu dokumentieren.', M, y, tw, lh) + 1.5;
     y = richParagraph(doc, 'Prüfintervalle nach CO2-Äquivalent:', 'ab 5 t CO2e alle 12 Monate, ab 50 t alle 6 Monate, ab 500 t alle 3 Monate. Mit fest installiertem Leckage-Erkennungssystem verdoppeln sich die Intervalle (24/12/6 Monate).', M, y, tw, lh) + 1.5;
     y = richParagraph(doc, 'Aufbewahrung:', 'mindestens 5 Jahre – durch Betreiber UND ausführenden Fachbetrieb. Auf Verlangen der Behörde vorzulegen.', M, y, tw, lh) + 1.5;
-    richParagraph(doc, 'Nach einer reparierten Leckage:', 'Nachkontrolle innerhalb eines Monats durch zertifiziertes Personal.', M, y, tw, lh);
+    y = richParagraph(doc, 'Nach einer reparierten Leckage:', 'Nachkontrolle innerhalb eines Monats durch zertifiziertes Personal.', M, y, tw, lh);
+
+    // ---------- Kältemittel-Bilanz je Jahr ----------
+    const bal = FGas.balance(sys, entries);
+    y += 8;
+    if (y > doc.internal.pageSize.getHeight() - 60) { doc.addPage('a4', 'portrait'); y = 24; }
+    y = sectionTitle(doc, 3, 'Kältemittel-Bilanz', y);
+    if (bal.rows.length) {
+      const kg = (v) => (v ? fmtNum(v, 3) : '–');
+      const row = (r) => [r.year, kg(r.zugefuegt), kg(r.neu), kg(r.recycelt), kg(r.aufgearbeitet), kg(r.entnommen),
+        r.rate === null || r.rate === undefined ? '–' : fmtNum(r.rate, 1) + ' %'];
+      doc.autoTable({
+        startY: y,
+        margin: { left: M, right: M, bottom: 24 },
+        theme: 'grid',
+        head: [['Jahr', 'zugefügt (kg)', 'davon neu', 'recycelt', 'aufgearbeitet', 'entnommen (kg)', 'Nachfüllrate *']],
+        body: [...bal.rows.map(row), ...(bal.rows.length > 1 ? [row(bal.total).map((c) => ({ content: c, styles: { fontStyle: 'bold' } }))] : [])],
+        styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 1.6, lineColor: LINE, lineWidth: 0.25, textColor: [20, 20, 20], halign: 'right' },
+        headStyles: { fillColor: LABEL_BG, textColor: [40, 50, 65], fontStyle: 'bold', halign: 'right' },
+        columnStyles: { 0: { halign: 'left' } },
+      });
+      doc.setFontSize(7.5);
+      doc.setTextColor(...GREY);
+      doc.text('* zugefügte Menge im Jahr bezogen auf die Füllmenge der Anlage (Hinweis auf Leckageverluste).', M, doc.lastAutoTable.finalY + 4);
+      doc.setTextColor(0);
+    } else {
+      doc.setFontSize(9);
+      doc.setTextColor(...GREY);
+      doc.text('Noch keine Kältemittel-Mengen erfasst.', M, y + 2);
+      doc.setTextColor(0);
+    }
 
     // ---------- Blatt 2 ff.: Einträge (Querformat) ----------
     doc.addPage('a4', 'landscape');
     y = 22;
-    y = sectionTitle(doc, 3, 'Einträge (chronologisch)', y);
+    y = sectionTitle(doc, 4, 'Einträge (chronologisch)', y);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.text('Anlage:', M, y + 2);
@@ -386,24 +455,83 @@ const PdfExport = (() => {
     });
 
     footnote(doc, '* Tätigkeit: Installation · Wartung/Instandhaltung · Reparatur · Dichtheitskontrolle · Rückgewinnung · Stilllegung.');
-    return finish(doc, settings);
+    photoPages(doc, 5, sys, entries, photos);
+    return doc;
   }
+
+  const drawSystem = (sys, doc, photos) => (Areas.isKaelte(sys) ? drawKaelte : drawGeneric)(sys, doc, photos);
+
+  /** Anlagenbuch einer Anlage (inkl. Fotos). */
+  async function build(sysId) {
+    const sys = Store.system(sysId);
+    const photos = await Photos.load(Store.entriesOf(sysId));
+    return finish(drawSystem(sys, null, photos), Store.get().settings);
+  }
+
+  /** Anlagen eines Kunden (optional nur ein Bereich), sortiert nach Bereich und Nummer. */
+  function customerSystems(customerId, areaKey) {
+    return Store.systemsOf(customerId)
+      .filter((s) => !areaKey || Areas.of(s) === areaKey)
+      .sort((a, b) => Areas.keys.indexOf(Areas.of(a)) - Areas.keys.indexOf(Areas.of(b)) || systemLabel(a).localeCompare(systemLabel(b), 'de'));
+  }
+
+  /** Sammel-PDF: Übersicht + Anlagenbuch jeder Anlage des Kunden. */
+  async function buildCustomer(customerId, areaKey) {
+    const cust = Store.customer(customerId);
+    const systems = customerSystems(customerId, areaKey);
+    const photos = await Photos.load(systems.flatMap((s) => Store.entriesOf(s.id)));
+    const doc = startDoc(null, `Anlagenübersicht ${cust.name}`);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(17);
+    doc.text('Anlagenübersicht', M, 24);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(betreiberText(cust), M, 31, { maxWidth: 180 });
+    doc.setFontSize(9);
+    doc.setTextColor(...GREY);
+    doc.text(`${areaKey ? Areas.get(areaKey).label : 'Alle Bereiche'} · Stand ${fmtDate(todayISO())} · ${systems.length} ${systems.length === 1 ? 'Anlage' : 'Anlagen'}`, M, 37);
+    doc.setTextColor(0);
+    const dueText = (d) => (d ? (d.date ? fmtDate(d.date) : 'offen') : '–');
+    doc.autoTable({
+      startY: 44,
+      margin: { left: M, right: M, bottom: 24 },
+      theme: 'grid',
+      head: [['Anlagen-Nr.', 'Bezeichnung', 'Bereich', 'Standort', 'Nächste Wartung', 'Nächste Dichtheitskontr.']],
+      body: systems.map((s) => {
+        const entries = Store.entriesOf(s.id);
+        return [s.anlagenNr || '', s.bezeichnung || '', Areas.get(Areas.of(s)).short, locationText(Store.location(s.locationId), s),
+          dueText(FGas.nextMaintenance(s, entries)), Areas.isKaelte(s) ? dueText(FGas.nextDue(s, entries)) : '–'];
+      }),
+      styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 1.8, lineColor: LINE, lineWidth: 0.25, textColor: [20, 20, 20], valign: 'top' },
+      headStyles: { fillColor: LABEL_BG, textColor: [40, 50, 65], fontStyle: 'bold' },
+      columnStyles: { 0: { cellWidth: 26 }, 2: { cellWidth: 20 }, 4: { cellWidth: 22 }, 5: { cellWidth: 26 } },
+    });
+    for (const s of systems) drawSystem(s, doc, photos);
+    return finish(doc, Store.get().settings);
+  }
+
+  const uml = { ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' };
+  const safe = (s) => (s || '')
+    .replace(/[äöüÄÖÜß]/g, (c) => uml[c])
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9\-_]+/g, '_').replace(/^_+|_+$/g, '');
 
   function filename(sysId) {
     const sys = Store.system(sysId);
     const cust = Store.customer(sys.customerId);
-    const uml = { ä: 'ae', ö: 'oe', ü: 'ue', Ä: 'Ae', Ö: 'Oe', Ü: 'Ue', ß: 'ss' };
-    const safe = (s) => (s || '')
-      .replace(/[äöüÄÖÜß]/g, (c) => uml[c])
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^A-Za-z0-9\-_]+/g, '_').replace(/^_+|_+$/g, '');
-    const today = todayISO();
-    return `Anlagenbuch_${[safe(cust && cust.name), safe(sys.anlagenNr || sys.bezeichnung)].filter(Boolean).join('_')}_${today}.pdf`;
+    return `Anlagenbuch_${[safe(cust && cust.name), safe(sys.anlagenNr || sys.bezeichnung)].filter(Boolean).join('_')}_${todayISO()}.pdf`;
   }
 
-  function download(sysId) {
-    return FileOut.save(build(sysId).output('blob'), filename(sysId), 'Anlagenbuch');
+  const customerFilename = (customerId, areaKey) =>
+    `Anlagenuebersicht_${safe(Store.customer(customerId).name)}_${areaKey ? safe(Areas.get(areaKey).short) : 'alle'}_${todayISO()}.pdf`;
+
+  async function download(sysId) {
+    return FileOut.save((await build(sysId)).output('blob'), filename(sysId), 'Anlagenbuch');
   }
 
-  return { build, filename, download };
+  async function downloadCustomer(customerId, areaKey) {
+    return FileOut.save((await buildCustomer(customerId, areaKey)).output('blob'), customerFilename(customerId, areaKey), 'Anlagenübersicht');
+  }
+
+  return { build, buildCustomer, customerSystems, filename, download, downloadCustomer };
 })();

@@ -1,5 +1,5 @@
 /* Offline-Cache für die App-Dateien. Bei Änderungen VERSION erhöhen. */
-const VERSION = 'anlagenbuch-v12';
+const VERSION = 'anlagenbuch-v14';
 const FILES = [
   './',
   'index.html',
@@ -8,10 +8,12 @@ const FILES = [
   'js/files.js',
   'js/data.js',
   'js/sync.js',
+  'js/photos.js',
   'js/areas.js',
   'js/signature.js',
   'js/pdf.js',
   'js/generic.js',
+  'js/export.js',
   'js/app.js',
   'vendor/jspdf.umd.min.js',
   'vendor/jspdf.plugin.autotable.min.js',
