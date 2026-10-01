@@ -10,8 +10,11 @@ const Areas = (() => {
     'Gas-Brennwertkessel', 'Gas-Brennwerttherme', 'Gas-Kombitherme', 'Gas-Niedertemperaturkessel',
     'Gas-Heizkessel atmosphärisch', 'Gas-Umlaufwasserheizer', 'Öl-Brennwertkessel', 'Öl-Niedertemperaturkessel',
     'Flüssiggas-Brennwertkessel', 'Gas-Warmwasserbereiter',
+    'Luft/Wasser-Wärmepumpe', 'Sole/Wasser-Wärmepumpe', 'Wasser/Wasser-Wärmepumpe', 'Hybrid-Wärmepumpe',
   ];
-  const isOel = (d) => /öl/i.test(d.brennstoff || '') || /öl/i.test(d.typ || '');
+  const isWP = (d) => /wärmepumpe/i.test(d.typ || '');
+  const isOel = (d) => !isWP(d) && (/öl/i.test(d.brennstoff || '') || /öl/i.test(d.typ || ''));
+  const fossil = (d) => !isWP(d);
 
   const heizung = {
     key: 'heizung',
@@ -19,9 +22,9 @@ const Areas = (() => {
     label: 'Heizungsanlagen',
     short: 'Heizung',
     icon: '🔥',
-    desc: 'Gas-, Öl- und Flüssiggas-Feuerstätten',
+    desc: 'Gas-, Öl- und Flüssiggas-Feuerstätten, Wärmepumpen',
     pdfTitle: 'Anlagenbuch / Wartungsnachweis Heizungsanlage',
-    pdfSubtitle: 'Nachweis über Wartung, Inspektion und Instandsetzung der Feuerungsanlage.',
+    pdfSubtitle: 'Nachweis über Wartung, Inspektion und Instandsetzung der Heizungsanlage.',
     notes: [
       ['Wartung:', 'Feuerstätten sind nach Herstellerangaben regelmäßig, in der Regel jährlich, durch einen Fachbetrieb zu warten (DVGW-TRGI / TRF bzw. DIN 4755 / DIN EN 15378).'],
       ['Messungen:', 'Emissionsmessungen nach 1. BImSchV erfolgen durch den bevollmächtigten Bezirksschornsteinfeger; die hier dokumentierten Werte dienen der Einstellung und Kontrolle.'],
@@ -36,7 +39,11 @@ const Areas = (() => {
         legend: 'Wärmeerzeuger',
         fields: [
           { name: 'typ', label: 'Anlagentyp', list: HEIZUNG_TYPEN, required: true },
-          { name: 'brennstoff', label: 'Brennstoff', type: 'select', options: ['', 'Erdgas E', 'Erdgas LL', 'Flüssiggas (Propan)', 'Heizöl EL', 'Heizöl EL schwefelarm', 'Sonstiges'] },
+          { name: 'brennstoff', label: 'Brennstoff', type: 'select', options: ['', 'Erdgas E', 'Erdgas LL', 'Flüssiggas (Propan)', 'Heizöl EL', 'Heizöl EL schwefelarm', 'Sonstiges'], when: fossil },
+          {
+            name: 'kaelteAnlage', label: 'Verbundene Kälteanlage (Kältekreis)', type: 'systemLink', when: isWP, full: true,
+            hint: 'Der Kältekreis der Wärmepumpe wird als Kälteanlage geführt (Kältemittel, Dichtheitskontrollen nach F-Gase-Verordnung).',
+          },
           { name: 'hersteller', label: 'Hersteller' },
           { name: 'modell', label: 'Modell / Typ' },
           { name: 'seriennr', label: 'Serien-Nr.' },
@@ -49,8 +56,10 @@ const Areas = (() => {
       {
         legend: 'Abgas & Hydraulik',
         fields: [
-          { name: 'betriebsart', label: 'Betriebsart', type: 'select', options: ['', 'raumluftabhängig', 'raumluftunabhängig'] },
-          { name: 'abgasanlage', label: 'Abgasanlage', list: ['Schornstein', 'Luft-Abgas-System (LAS)', 'Abgasleitung im Schacht', 'Abgasleitung an der Fassade', 'Sonstige'] },
+          { name: 'betriebsart', label: 'Betriebsart', type: 'select', options: ['', 'raumluftabhängig', 'raumluftunabhängig'], when: fossil },
+          { name: 'abgasanlage', label: 'Abgasanlage', list: ['Schornstein', 'Luft-Abgas-System (LAS)', 'Abgasleitung im Schacht', 'Abgasleitung an der Fassade', 'Sonstige'], when: fossil },
+          { name: 'aufstellung', label: 'Aufstellung', type: 'select', options: ['', 'Außenaufstellung', 'Innenaufstellung', 'Split (Innen- und Außeneinheit)'], when: isWP },
+          { name: 'zusatzheizung', label: 'Zusatzheizung / Heizstab', unit: 'kW', num: true, when: isWP },
           { name: 'warmwasser', label: 'Warmwasserbereitung', type: 'select', options: ['', 'keine', 'Speicher', 'Durchlauf (Kombigerät)', 'Schichtspeicher', 'Frischwasserstation'] },
           { name: 'speicherInhalt', label: 'Speicherinhalt', unit: 'l', num: true },
           { name: 'mag', label: 'Ausdehnungsgefäß', unit: 'l', num: true },
@@ -61,26 +70,36 @@ const Areas = (() => {
       {
         legend: 'Messwerte',
         fields: [
-          { name: 'abgastemp', label: 'Abgastemperatur', unit: '°C', num: true },
-          { name: 'lufttemp', label: 'Verbrennungslufttemperatur', unit: '°C', num: true },
-          { name: 'o2', label: 'O2', unit: '%', num: true },
-          { name: 'co2', label: 'CO2', unit: '%', num: true },
-          { name: 'co', label: 'CO (unverdünnt)', unit: 'ppm', num: true },
-          { name: 'abgasverlust', label: 'Abgasverlust qA', unit: '%', num: true },
-          { name: 'zug', label: 'Förderdruck / Zug', unit: 'hPa', num: true },
+          { name: 'abgastemp', label: 'Abgastemperatur', unit: '°C', num: true, when: fossil },
+          { name: 'lufttemp', label: 'Verbrennungslufttemperatur', unit: '°C', num: true, when: fossil },
+          { name: 'o2', label: 'O2', unit: '%', num: true, when: fossil },
+          { name: 'co2', label: 'CO2', unit: '%', num: true, when: fossil },
+          { name: 'co', label: 'CO (unverdünnt)', unit: 'ppm', num: true, when: fossil },
+          { name: 'abgasverlust', label: 'Abgasverlust qA', unit: '%', num: true, when: fossil },
+          { name: 'zug', label: 'Förderdruck / Zug', unit: 'hPa', num: true, when: fossil },
           { name: 'russzahl', label: 'Rußzahl', num: true, when: isOel },
           { name: 'oelderivate', label: 'Ölderivate', type: 'select', options: ['', 'nein', 'ja'], when: isOel },
-          { name: 'gasFliessdruck', label: 'Gas-Anschlussfließdruck', unit: 'mbar', num: true, when: (s) => !isOel(s) },
+          { name: 'gasFliessdruck', label: 'Gas-Anschlussfließdruck', unit: 'mbar', num: true, when: (s) => fossil(s) && !isOel(s) },
+          { name: 'aussentemp', label: 'Außentemperatur', unit: '°C', num: true, when: isWP },
+          { name: 'vorlauf', label: 'Vorlauftemperatur', unit: '°C', num: true, when: isWP },
+          { name: 'ruecklauf', label: 'Rücklauftemperatur', unit: '°C', num: true, when: isWP },
           { name: 'anlagendruck', label: 'Anlagendruck', unit: 'bar', num: true },
           { name: 'magVordruck', label: 'MAG-Vordruck', unit: 'bar', num: true },
         ],
       },
     ],
     arbeiten: [
-      'Brenner gereinigt und geprüft', 'Brennraum / Wärmetauscher gereinigt', 'Zünd- und Überwachungselektrode geprüft / eingestellt',
-      'Gasarmatur und Gasleitung auf Dichtheit geprüft', 'Ölfilter gewechselt', 'Öldüse gewechselt', 'Kondensatablauf / Siphon gereinigt',
-      'Neutralisation geprüft', 'Abgasweg auf Dichtheit geprüft', 'Sicherheitsventil geprüft', 'Ausdehnungsgefäß geprüft',
-      'Anlagendruck / Heizungswasser geprüft', 'Regelung / Heizkurve geprüft', 'Umwälzpumpe geprüft', 'Sicherheitseinrichtungen geprüft',
+      { t: 'Brenner gereinigt und geprüft', when: fossil }, { t: 'Brennraum / Wärmetauscher gereinigt', when: fossil },
+      { t: 'Zünd- und Überwachungselektrode geprüft / eingestellt', when: fossil },
+      { t: 'Gasarmatur und Gasleitung auf Dichtheit geprüft', when: (d) => fossil(d) && !isOel(d) },
+      { t: 'Ölfilter gewechselt', when: isOel }, { t: 'Öldüse gewechselt', when: isOel },
+      { t: 'Kondensatablauf / Siphon gereinigt', when: fossil }, { t: 'Neutralisation geprüft', when: fossil },
+      { t: 'Abgasweg auf Dichtheit geprüft', when: fossil },
+      { t: 'Verdampfer / Lamellen gereinigt', when: isWP }, { t: 'Ventilator geprüft', when: isWP },
+      { t: 'Tauwasserablauf gereinigt / Ablaufheizung geprüft', when: isWP }, { t: 'Elektrische Anschlüsse geprüft', when: isWP },
+      { t: 'Heizstab / Zusatzheizung geprüft', when: isWP }, { t: 'Schmutzfänger / Filter im Heizkreis gereinigt', when: isWP },
+      'Sicherheitsventil geprüft', 'Ausdehnungsgefäß geprüft', 'Anlagendruck / Heizungswasser geprüft', 'Regelung / Heizkurve geprüft',
+      'Umwälzpumpe geprüft', 'Sicherheitseinrichtungen geprüft',
     ],
   };
 
@@ -197,12 +216,21 @@ const Areas = (() => {
   /** Alle Felder (Anlage oder Eintrag) eines Bereichs, gefiltert nach Sichtbarkeit für die Anlage. */
   const visible = (fields, data) => fields.filter((f) => !f.when || f.when(data || {}));
 
+  /** Arbeiten-Checkliste passend zur Anlage (Einträge können eine Bedingung „when“ haben). */
+  const arbeitenFor = (area, sys) => (area.arbeiten || [])
+    .filter((a) => typeof a === 'string' || !a.when || a.when(sys || {}))
+    .map((a) => (typeof a === 'string' ? a : a.t));
+
   /** Wert mit Einheit für Anzeige/PDF. */
   function display(f, v) {
     if (v === undefined || v === null || v === '' || v === false) return '';
+    if (f.type === 'systemLink') {
+      const x = Store.system(v);
+      return x ? [x.anlagenNr, x.bezeichnung].filter(Boolean).join(' – ') : '';
+    }
     const val = f.num ? fmtNum(v, 3) : String(v);
     return f.unit ? `${val} ${f.unit}` : val;
   }
 
-  return { all, keys, get, of, isKaelte, get current() { return current; }, setCurrent, visible, display };
+  return { all, keys, get, of, isKaelte, isWP, get current() { return current; }, setCurrent, visible, display, arbeitenFor };
 })();

@@ -6,11 +6,16 @@ const Generic = (() => {
   const ERGEBNIS = ['', 'in Ordnung', 'Mängel festgestellt', 'Mängel behoben', 'außer Betrieb genommen'];
 
   /** Formularfeld aus einer Feld-Definition. */
-  function specField(f, v) {
+  function specField(f, v, ctx = {}) {
     const label = f.unit ? `${f.label} (${f.unit})` : f.label;
     const opts = { required: f.required, hint: f.hint || '', attrs: [f.num ? 'inputmode="decimal"' : '', f.attrs || ''].join(' '), full: f.full };
     let html;
-    if (f.type === 'select') html = field(f.name, label, v, { ...opts, type: 'select', options: f.options.map((o) => [o, o || '–']) });
+    if (f.type === 'systemLink') {
+      // Auswahl einer Kälteanlage desselben Kunden (z. B. Kältekreis einer Wärmepumpe)
+      const options = Store.systemsOf(ctx.customerId).filter((x) => Areas.isKaelte(x))
+        .map((x) => [x.id, [systemTitle(x), x.kaeltemittel, locationTitle(Store.location(x.locationId))].filter(Boolean).join(' · ')]);
+      html = field(f.name, label, v, { ...opts, type: 'select', options: [['', options.length ? '– noch nicht verbunden –' : '– keine Kälteanlage beim Kunden –'], ...options] });
+    } else if (f.type === 'select') html = field(f.name, label, v, { ...opts, type: 'select', options: f.options.map((o) => [o, o || '–']) });
     else if (f.list) html = field(f.name, label, v, { ...opts, list: 'list-' + f.name });
     else html = field(f.name, label, v, { ...opts, type: f.type || 'text' });
     const list = f.list ? `<datalist id="list-${f.name}">${f.list.map((o) => `<option value="${esc(o)}">`).join('')}</datalist>` : '';
@@ -27,6 +32,13 @@ const Generic = (() => {
   }
 
   const kv = (label, value) => (value ? `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>` : '');
+
+  /** Verknüpfte Kälteanlage: Link zur Anlage oder Knopf zum Anlegen und Verbinden. */
+  function linkRow(f, s) {
+    const x = Store.system(s[f.name]);
+    if (x) return `<dt>${esc(f.label)}</dt><dd><a href="#/anlage/${x.id}">❄️ ${esc(systemTitle(x))}</a>${x.kaeltemittel ? ` · ${esc(x.kaeltemittel)}` : ''}</dd>`;
+    return `<dt>${esc(f.label)}</dt><dd><a class="btn small" href="#/anlage/neu?standort=${s.locationId}&bereich=kaelte&verbinden=${s.id}">❄️ Kälteanlage anlegen und verbinden</a></dd>`;
+  }
 
   // ---------- Anlage anlegen / bearbeiten ----------
   function systemForm(id, q, areaKey) {
@@ -64,7 +76,7 @@ const Generic = (() => {
         ${area.systemSections.map((sec) => `
           <fieldset class="card">
             <legend>${esc(sec.legend)}</legend>
-            <div class="grid">${sec.fields.map((f) => specField(f, v[f.name])).join('')}</div>
+            <div class="grid">${sec.fields.map((f) => specField(f, v[f.name], { customerId: c.id })).join('')}</div>
           </fieldset>`).join('')}
         <fieldset class="card">
           <legend>Wartung &amp; Inbetriebnahme</legend>
@@ -138,7 +150,7 @@ const Generic = (() => {
           <dt>Bereich</dt><dd>${area.icon} ${esc(area.label)}</dd>
           <dt>Betreiber</dt><dd>${esc(c.name)}${customerAddress(c) ? ', ' + esc(customerAddress(c)) : ''}</dd>
           <dt>Standort</dt><dd>${esc(locationText(l, s)) || '–'}</dd>
-          ${area.systemSections.flatMap((sec) => Areas.visible(sec.fields, s)).map((f) => kv(f.label, Areas.display(f, s[f.name]))).join('')}
+          ${area.systemSections.flatMap((sec) => Areas.visible(sec.fields, s)).map((f) => (f.type === 'systemLink' ? linkRow(f, s) : kv(f.label, Areas.display(f, s[f.name])))).join('')}
           <dt>Wartungsintervall</dt><dd>${m ? `alle ${m} Monate` : 'keine regelmäßige Wartung'}</dd>
           <dt>Nächste Wartung</dt><dd><span class="badge ${maint ? maintSt.cls : ''}">${esc(maint ? maintSt.text : '–')}</span></dd>
           ${kv('Inbetriebnahme', [fmtDate(s.errichtetAm), s.errichtetDurch].filter(Boolean).join(' · '))}
@@ -184,6 +196,7 @@ const Generic = (() => {
       arbeiten: [],
     };
     const done = new Set(v.arbeiten || []);
+    const arbeiten = Areas.arbeitenFor(area, s);
     const sections = area.entrySections.map((sec) => ({ ...sec, fields: Areas.visible(sec.fields, s).filter((f) => !f.legacy) })).filter((sec) => sec.fields.length);
     render(`
       ${crumbs({ c, l: Store.location(s.locationId), s })}
@@ -203,11 +216,11 @@ const Generic = (() => {
           </fieldset>`).join('')}
         <fieldset class="card">
           <legend>Durchgeführte Arbeiten</legend>
-          <div class="checks">${area.arbeiten.map((a) => `
+          <div class="checks">${arbeiten.map((a) => `
             <label class="check"><input type="checkbox" data-arbeit value="${esc(a)}"${done.has(a) ? ' checked' : ''}> ${esc(a)}</label>`).join('')}
           </div>
           <div class="grid" style="margin-top:8px">
-            ${field('weitereArbeiten', 'Weitere Arbeiten (je Zeile eine)', (v.arbeiten || []).filter((a) => !area.arbeiten.includes(a)).join('\n'), { type: 'textarea', full: true })}
+            ${field('weitereArbeiten', 'Weitere Arbeiten (je Zeile eine)', (v.arbeiten || []).filter((a) => !arbeiten.includes(a)).join('\n'), { type: 'textarea', full: true })}
             ${field('ersatzteile', 'Ersatzteile / Material', v.ersatzteile, { type: 'textarea', full: true })}
           </div>
         </fieldset>

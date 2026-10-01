@@ -373,7 +373,8 @@ const PdfExport = (() => {
         [label('Betreiber (Name, Anschrift)'), wide(betreiber)],
         [label('Anlagen-Standort'), wide(standort)],
         [label('Anlagen-Nr. / Bezeichnung'), wide(systemLabel(sys))],
-        [label('Anlagentyp (z. B. Kaltwassersatz, VRF, Kühlzelle)'), wide(sys.typ)],
+        [label('Anlagentyp (z. B. Kaltwassersatz, VRF, Kühlzelle)'), wide([sys.typ, ...Store.get().systems
+          .filter((x) => x.kaelteAnlage === sys.id).map((x) => `Kältekreis der Wärmepumpe ${systemLabel(x)}`)].filter(Boolean).join(' · '))],
         [label('Hersteller / Modell / Serien-Nr.'), wide(geraet)],
         [label('Kältemittel (z. B. R-410A)'), sys.kaeltemittel || '', label('GWP-Wert'), fmtNum(sys.gwp, 3)],
         [label('Füllmenge (kg)'), fmtNum(sys.fuellmenge, 3), label('CO2-Äquivalent (t) = kg × GWP ÷ 1.000'), isFinite(t) ? fmtNum(t, 2) + ' t' : ''],

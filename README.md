@@ -8,7 +8,7 @@ nach Art. 7 der F-Gase-Verordnung (EU) 2024/573 – für **Moritz Herrmann Heizu
 Beim Öffnen wählt man den Bereich – Kunden und Standorte sind in allen Bereichen dieselben:
 
 - **❄️ Kälteanlagen** – Anlagenbuch nach F-Gase-Verordnung (siehe unten)
-- **🔥 Heizungsanlagen** – klassische fossile Feuerstätten (Gas, Öl, Flüssiggas): Kessel-/Brennerdaten,
+- **🔥 Heizungsanlagen** – fossile Feuerstätten (Gas, Öl, Flüssiggas) und Wärmepumpen (Kältekreis mit einer Kälteanlage verknüpfbar): Kessel-/Brennerdaten,
   Abgas-Messwerte (Abgastemperatur, O2, CO2, CO, qA, Zug, Rußzahl …), Checkliste der Wartungsarbeiten
 - **💧 Trinkwasseranlagen** – Speicher, Hauswasserstationen, Filter, Systemtrenner, Druckminderer,
   Sicherheitsventile, Enthärtung, Armaturen …; Wartungsintervall-Richtwerte je Komponente
