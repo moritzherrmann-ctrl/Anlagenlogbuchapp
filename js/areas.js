@@ -40,17 +40,41 @@ const Areas = (() => {
         fields: [
           { name: 'typ', label: 'Anlagentyp', list: HEIZUNG_TYPEN, required: true },
           { name: 'brennstoff', label: 'Brennstoff', type: 'select', options: ['', 'Erdgas E', 'Erdgas LL', 'Flüssiggas (Propan)', 'Heizöl EL', 'Heizöl EL schwefelarm', 'Sonstiges'], when: fossil },
-          {
-            name: 'kaelteAnlage', label: 'Verbundene Kälteanlage (Kältekreis)', type: 'systemLink', when: isWP, full: true,
-            hint: 'Der Kältekreis der Wärmepumpe wird als Kälteanlage geführt (Kältemittel, Dichtheitskontrollen nach F-Gase-Verordnung).',
-          },
-          { name: 'hersteller', label: 'Hersteller' },
-          { name: 'modell', label: 'Modell / Typ' },
-          { name: 'seriennr', label: 'Serien-Nr.' },
+
+          { name: 'hersteller', label: 'Hersteller', when: fossil },
+          { name: 'modell', label: 'Modell / Typ', when: fossil },
+          { name: 'seriennr', label: 'Serien-Nr.', when: fossil },
           { name: 'baujahr', label: 'Baujahr', attrs: 'inputmode="numeric"' },
-          { name: 'leistung', label: 'Nennwärmeleistung', unit: 'kW', num: true },
+          { name: 'leistung', label: 'Nennwärmeleistung', unit: 'kW', num: true, when: fossil },
           { name: 'brenner', label: 'Brenner (Hersteller / Typ)', when: isOel, hint: 'bei Gebläsebrennern' },
           { name: 'oeltank', label: 'Öltank (Art / Volumen)', when: isOel },
+        ],
+      },
+      {
+        legend: 'Außengeräte / Kaskade',
+        when: isWP,
+        fields: [
+          {
+            name: 'aussengeraete', label: 'Außengeräte', type: 'units', unitLabel: 'Außengerät', full: true,
+            hint: 'Bei einer Kaskade jedes Außengerät einzeln erfassen. Jedes Außengerät hat einen eigenen Kältekreis, der als Kälteanlage geführt wird (Kältemittel, Dichtheitskontrollen nach F-Gase-Verordnung).',
+            subfields: [
+              { name: 'hersteller', label: 'Hersteller' },
+              { name: 'modell', label: 'Modell / Typ' },
+              { name: 'seriennr', label: 'Serien-Nr.' },
+              { name: 'leistung', label: 'Heizleistung', unit: 'kW', num: true },
+              { name: 'kaelteAnlage', label: 'Kältekreis (Kälteanlage)', type: 'systemLink' },
+            ],
+          },
+        ],
+      },
+      {
+        legend: 'Innengerät',
+        when: isWP,
+        fields: [
+          { name: 'innenArt', label: 'Innengerät (Art)', type: 'select', options: ['', 'Hydraulikmodul / Hydraulikstation', 'Inneneinheit mit integriertem Speicher', 'Split-Inneneinheit', 'Wärmepumpen-Regler / Kaskadenregler', 'Sonstiges'] },
+          { name: 'innenHersteller', label: 'Hersteller Innengerät' },
+          { name: 'innenModell', label: 'Modell Innengerät' },
+          { name: 'innenSeriennr', label: 'Serien-Nr. Innengerät' },
         ],
       },
       {
@@ -221,16 +245,49 @@ const Areas = (() => {
     .filter((a) => typeof a === 'string' || !a.when || a.when(sys || {}))
     .map((a) => (typeof a === 'string' ? a : a.t));
 
+  const linkLabel = (id) => {
+    const x = Store.system(id);
+    return x ? [x.anlagenNr, x.bezeichnung].filter(Boolean).join(' – ') : '';
+  };
+
+  /** Eine Zeile je Gerät (Kaskade) für Anzeige/PDF. */
+  function unitLines(f, units) {
+    const lines = (units || []).map((u, i) => {
+      const parts = f.subfields.filter((sf) => sf.type !== 'systemLink').map((sf) => display(sf, u[sf.name])).filter(Boolean);
+      const link = linkLabel(u.kaelteAnlage);
+      return `${f.unitLabel} ${i + 1}: ${parts.join(', ') || '–'}${link ? ` · Kältekreis ${link}` : ''}`;
+    });
+    const total = (units || []).reduce((a, u) => a + (FGas.num(u.leistung) || 0), 0);
+    if ((units || []).length > 1 && total) lines.push(`Kaskade gesamt: ${fmtNum(total, 1)} kW`);
+    return lines;
+  }
+
+  /** Abschnitte mit Bedingung und ihre sichtbaren Felder. */
+  const visibleSections = (sections, data) => sections
+    .filter((sec) => !sec.when || sec.when(data || {}))
+    .map((sec) => ({ ...sec, fields: visible(sec.fields, data) }))
+    .filter((sec) => sec.fields.length);
+
   /** Wert mit Einheit für Anzeige/PDF. */
   function display(f, v) {
+    if (f.type === 'units') return unitLines(f, v).join('\n');
     if (v === undefined || v === null || v === '' || v === false) return '';
-    if (f.type === 'systemLink') {
-      const x = Store.system(v);
-      return x ? [x.anlagenNr, x.bezeichnung].filter(Boolean).join(' – ') : '';
-    }
+    if (f.type === 'systemLink') return linkLabel(v);
     const val = f.num ? fmtNum(v, 3) : String(v);
     return f.unit ? `${val} ${f.unit}` : val;
   }
 
-  return { all, keys, get, of, isKaelte, isWP, get current() { return current; }, setCurrent, visible, display, arbeitenFor };
+  /** Wärmepumpen (mit Außengerät-Nr.), deren Kältekreis die angegebene Kälteanlage ist. */
+  function heatPumpsOf(kaelteId) {
+    const out = [];
+    for (const x of Store.get().systems) {
+      if (of(x) !== 'heizung') continue;
+      (x.aussengeraete || []).forEach((u, i) => { if (u.kaelteAnlage === kaelteId) out.push({ wp: x, nr: i + 1, count: x.aussengeraete.length }); });
+    }
+    return out;
+  }
+
+  return {
+    all, keys, get, of, isKaelte, isWP, get current() { return current; }, setCurrent, visible, visibleSections, display, arbeitenFor, heatPumpsOf,
+  };
 })();

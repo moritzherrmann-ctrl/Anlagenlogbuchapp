@@ -71,6 +71,15 @@ const Store = (() => {
     const now = new Date().toISOString();
     for (const sys of s.systems) FGas.fixGwp(sys);
     renumberPerArea(s);
+    // Wärmepumpen: bisherige Gerätedaten werden zu „Außengerät 1“ (Kaskaden-Liste)
+    for (const sys of s.systems) {
+      if (sys.bereich !== 'heizung' || !/wärmepumpe/i.test(sys.typ || '') || Array.isArray(sys.aussengeraete)) continue;
+      sys.aussengeraete = [{
+        id: `${sys.id}-1`, hersteller: sys.hersteller || '', modell: sys.modell || '', seriennr: sys.seriennr || '',
+        leistung: sys.leistung || '', kaelteAnlage: sys.kaelteAnlage || '',
+      }];
+      delete sys.kaelteAnlage;
+    }
     for (const sys of s.systems) {
       if (sys.locationId && s.locations.some((l) => l.id === sys.locationId)) continue;
       const cust = s.customers.find((c) => c.id === sys.customerId) || {};

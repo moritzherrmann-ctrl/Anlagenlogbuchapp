@@ -5,15 +5,80 @@ const Generic = (() => {
   const INTERVALS = [['3', 'alle 3 Monate'], ['6', 'alle 6 Monate'], ['12', 'alle 12 Monate'], ['24', 'alle 24 Monate'], ['36', 'alle 36 Monate'], ['0', 'keine regelmäßige Wartung']];
   const ERGEBNIS = ['', 'in Ordnung', 'Mängel festgestellt', 'Mängel behoben', 'außer Betrieb genommen'];
 
+  const kaelteOptions = (customerId) => Store.systemsOf(customerId).filter((x) => Areas.isKaelte(x))
+    .map((x) => [x.id, [systemTitle(x), x.kaeltemittel, locationTitle(Store.location(x.locationId))].filter(Boolean).join(' · ')]);
+
+  /** Ein Gerät der Liste (z. B. Außengerät einer Kaskade); Eingaben über data-sub, nicht über formData. */
+  function unitHtml(f, u, i, ctx) {
+    const inputs = f.subfields.map((sf) => {
+      const label = sf.unit ? `${sf.label} (${sf.unit})` : sf.label;
+      const val = u[sf.name] ?? '';
+      if (sf.type === 'systemLink') {
+        const opts = kaelteOptions(ctx.customerId);
+        return `<label class="field full"><span>${esc(label)}</span><select data-sub="${sf.name}">
+          <option value="">${opts.length ? '– noch nicht verbunden –' : '– keine Kälteanlage beim Kunden –'}</option>
+          ${opts.map(([id, t]) => `<option value="${esc(id)}"${id === val ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
+      }
+      return `<label class="field"><span>${esc(label)}</span><input data-sub="${sf.name}" value="${esc(val)}"${sf.num ? ' inputmode="decimal"' : ''}></label>`;
+    }).join('');
+    return `<div class="unit" data-unit="${esc(u.id)}">
+      <div class="unit-head"><strong>${esc(f.unitLabel)} ${i + 1}</strong>
+        <button type="button" class="btn small ghost" data-unit-del>Entfernen</button></div>
+      <div class="grid">${inputs}</div></div>`;
+  }
+
+  function unitsEditor(f, list, ctx) {
+    const units = Array.isArray(list) && list.length ? list : [{ id: Store.uid() }];
+    return `<div class="units" data-units="${f.name}" style="grid-column:1/-1">
+      ${f.hint ? `<p class="hint" style="margin:0 0 8px">${esc(f.hint)}</p>` : ''}
+      <div class="unit-list">${units.map((u, i) => unitHtml(f, u, i, ctx)).join('')}</div>
+      <button type="button" class="btn small" data-unit-add>+ weiteres ${esc(f.unitLabel)} (Kaskade)</button>
+    </div>`;
+  }
+
+  /** Geräte-Editor verdrahten: hinzufügen, entfernen, neu nummerieren. */
+  function bindUnits(form, sections, ctx) {
+    for (const f of sections.flatMap((sec) => sec.fields).filter((x) => x.type === 'units')) {
+      const box = form.querySelector(`[data-units="${f.name}"]`);
+      if (!box) continue;
+      const list = box.querySelector('.unit-list');
+      const renumber = () => list.querySelectorAll('.unit-head strong').forEach((el, i) => { el.textContent = `${f.unitLabel} ${i + 1}`; });
+      box.addEventListener('click', (e) => {
+        if (e.target.closest('[data-unit-add]')) {
+          list.insertAdjacentHTML('beforeend', unitHtml(f, { id: Store.uid() }, list.children.length, ctx));
+          renumber();
+        } else if (e.target.closest('[data-unit-del]')) {
+          if (list.children.length <= 1) { alert(`Mindestens ein ${f.unitLabel} ist nötig.`); return; }
+          if (!confirm(`${f.unitLabel} entfernen?`)) return;
+          e.target.closest('.unit').remove();
+          renumber();
+        }
+      });
+    }
+  }
+
+  /** Geräte-Listen aus dem Formular lesen. */
+  function readUnits(form) {
+    const out = {};
+    form.querySelectorAll('[data-units]').forEach((box) => {
+      out[box.dataset.units] = [...box.querySelectorAll('.unit')].map((el) => {
+        const u = { id: el.dataset.unit };
+        el.querySelectorAll('[data-sub]').forEach((inp) => { u[inp.dataset.sub] = inp.value.trim(); });
+        return u;
+      });
+    });
+    return out;
+  }
+
   /** Formularfeld aus einer Feld-Definition. */
   function specField(f, v, ctx = {}) {
+    if (f.type === 'units') return unitsEditor(f, v, ctx);
     const label = f.unit ? `${f.label} (${f.unit})` : f.label;
     const opts = { required: f.required, hint: f.hint || '', attrs: [f.num ? 'inputmode="decimal"' : '', f.attrs || ''].join(' '), full: f.full };
     let html;
     if (f.type === 'systemLink') {
       // Auswahl einer Kälteanlage desselben Kunden (z. B. Kältekreis einer Wärmepumpe)
-      const options = Store.systemsOf(ctx.customerId).filter((x) => Areas.isKaelte(x))
-        .map((x) => [x.id, [systemTitle(x), x.kaeltemittel, locationTitle(Store.location(x.locationId))].filter(Boolean).join(' · ')]);
+      const options = kaelteOptions(ctx.customerId);
       html = field(f.name, label, v, { ...opts, type: 'select', options: [['', options.length ? '– noch nicht verbunden –' : '– keine Kälteanlage beim Kunden –'], ...options] });
     } else if (f.type === 'select') html = field(f.name, label, v, { ...opts, type: 'select', options: f.options.map((o) => [o, o || '–']) });
     else if (f.list) html = field(f.name, label, v, { ...opts, list: 'list-' + f.name });
@@ -24,6 +89,10 @@ const Generic = (() => {
 
   /** Felder mit Bedingung (when) passend zu den aktuellen Daten ein-/ausblenden. */
   function applyVisibility(form, sections, data) {
+    sections.forEach((sec, i) => {
+      const fs = form.querySelector(`fieldset[data-section="${i}"]`);
+      if (fs && sec.when) fs.hidden = !sec.when(data);
+    });
     for (const f of sections.flatMap((s) => s.fields)) {
       if (!f.when) continue;
       const el = form.querySelector(`.spec[data-name="${f.name}"]`);
@@ -33,11 +102,20 @@ const Generic = (() => {
 
   const kv = (label, value) => (value ? `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>` : '');
 
-  /** Verknüpfte Kälteanlage: Link zur Anlage oder Knopf zum Anlegen und Verbinden. */
-  function linkRow(f, s) {
-    const x = Store.system(s[f.name]);
-    if (x) return `<dt>${esc(f.label)}</dt><dd><a href="#/anlage/${x.id}">❄️ ${esc(systemTitle(x))}</a>${x.kaeltemittel ? ` · ${esc(x.kaeltemittel)}` : ''}</dd>`;
-    return `<dt>${esc(f.label)}</dt><dd><a class="btn small" href="#/anlage/neu?standort=${s.locationId}&bereich=kaelte&verbinden=${s.id}">❄️ Kälteanlage anlegen und verbinden</a></dd>`;
+  /** Geräte (Kaskade) mit Kältekreis: Link zur Kälteanlage oder Knopf zum Anlegen und Verbinden. */
+  function unitRows(f, s) {
+    const units = s[f.name] || [];
+    const rows = units.map((u, i) => {
+      const parts = f.subfields.filter((sf) => sf.type !== 'systemLink').map((sf) => Areas.display(sf, u[sf.name])).filter(Boolean);
+      const x = Store.system(u.kaelteAnlage);
+      const link = x
+        ? `<a href="#/anlage/${x.id}">❄️ ${esc(systemTitle(x))}</a>${x.kaeltemittel ? ` · ${esc(x.kaeltemittel)}` : ''}`
+        : `<a class="btn small" href="#/anlage/neu?standort=${s.locationId}&bereich=kaelte&verbinden=${s.id}&geraet=${encodeURIComponent(u.id)}">❄️ Kälteanlage anlegen und verbinden</a>`;
+      return `<dt>${esc(f.unitLabel)} ${i + 1}</dt><dd>${esc(parts.join(', ') || '–')}<div style="margin-top:4px">Kältekreis: ${link}</div></dd>`;
+    });
+    const total = units.reduce((a, u) => a + (FGas.num(u.leistung) || 0), 0);
+    if (units.length > 1) rows.push(`<dt>Kaskade</dt><dd>${units.length} Außengeräte${total ? ` · gesamt ${fmtNum(total, 1)} kW` : ''}</dd>`);
+    return rows.join('');
   }
 
   // ---------- Anlage anlegen / bearbeiten ----------
@@ -73,8 +151,8 @@ const Generic = (() => {
             ${field('aufstellort', area.key === 'heizung' ? 'Aufstellraum (optional)' : 'Einbauort (optional)', v.aufstellort, { hint: 'z. B. „Heizraum UG“' })}
           </div>
         </fieldset>
-        ${area.systemSections.map((sec) => `
-          <fieldset class="card">
+        ${area.systemSections.map((sec, i) => `
+          <fieldset class="card" data-section="${i}">
             <legend>${esc(sec.legend)}</legend>
             <div class="grid">${sec.fields.map((f) => specField(f, v[f.name], { customerId: c.id })).join('')}</div>
           </fieldset>`).join('')}
@@ -101,6 +179,7 @@ const Generic = (() => {
     let intervalTouched = !!s;
     f.wartungsintervall.addEventListener('change', () => { intervalTouched = true; });
     const update = () => applyVisibility(f, area.systemSections, formData(f));
+    bindUnits(f, area.systemSections, { customerId: c.id });
     f.addEventListener('input', update);
     f.addEventListener('change', (e) => {
       if (e.target.name === 'typ' && area.typeIntervals && !intervalTouched) {
@@ -113,6 +192,13 @@ const Generic = (() => {
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       const d = formData(f);
+      // Geräte-Listen nur speichern, wenn ihr Abschnitt sichtbar ist (z. B. nur bei Wärmepumpen)
+      const units = readUnits(f);
+      for (const sec of area.systemSections) {
+        for (const fld of sec.fields.filter((x) => x.type === 'units')) {
+          if (!sec.when || sec.when(d)) d[fld.name] = units[fld.name];
+        }
+      }
       Store.noteSystemNumber(c.id, d.anlagenNr, area.key);
       const saved = await Store.upsert('systems', { ...d, id: id || undefined, customerId: c.id, bereich: area.key });
       toast('Anlage gespeichert');
@@ -150,7 +236,7 @@ const Generic = (() => {
           <dt>Bereich</dt><dd>${area.icon} ${esc(area.label)}</dd>
           <dt>Betreiber</dt><dd>${esc(c.name)}${customerAddress(c) ? ', ' + esc(customerAddress(c)) : ''}</dd>
           <dt>Standort</dt><dd>${esc(locationText(l, s)) || '–'}</dd>
-          ${area.systemSections.flatMap((sec) => Areas.visible(sec.fields, s)).map((f) => (f.type === 'systemLink' ? linkRow(f, s) : kv(f.label, Areas.display(f, s[f.name])))).join('')}
+          ${Areas.visibleSections(area.systemSections, s).flatMap((sec) => sec.fields).map((f) => (f.type === 'units' ? unitRows(f, s) : kv(f.label, Areas.display(f, s[f.name])))).join('')}
           <dt>Wartungsintervall</dt><dd>${m ? `alle ${m} Monate` : 'keine regelmäßige Wartung'}</dd>
           <dt>Nächste Wartung</dt><dd><span class="badge ${maint ? maintSt.cls : ''}">${esc(maint ? maintSt.text : '–')}</span></dd>
           ${kv('Inbetriebnahme', [fmtDate(s.errichtetAm), s.errichtetDurch].filter(Boolean).join(' · '))}

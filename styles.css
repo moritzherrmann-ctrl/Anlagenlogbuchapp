@@ -246,3 +246,8 @@ table.data th { color: var(--muted); font-weight: 600; font-size: .8rem; }
 table.data tr.total td { font-weight: 700; border-top: 2px solid var(--border); }
 
 .company-logo { display: block; width: min(220px, 60%); height: auto; margin: 4px auto 16px; border-radius: 8px; }
+
+/* Geräte-Liste (Kaskade) */
+.unit { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px 12px; margin-bottom: 10px; background: var(--surface-2); }
+.unit-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.unit .field input, .unit .field select { background: var(--surface); }

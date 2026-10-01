@@ -265,7 +265,7 @@ const PdfExport = (() => {
       [label('Betreiber (Name, Anschrift)'), betreiberText(cust)],
       [label('Anlagen-Standort'), standort],
       [label('Anlagen-Nr. / Bezeichnung'), systemLabel(sys)],
-      ...area.systemSections.flatMap((sec) => Areas.visible(sec.fields, sys).map((f) => [label(f.label), Areas.display(f, sys[f.name])])),
+      ...Areas.visibleSections(area.systemSections, sys).flatMap((sec) => sec.fields.map((f) => [label(f.label), Areas.display(f, sys[f.name])])),
       [label('Inbetriebnahme / errichtet durch'), [sys.errichtetAm ? fmtDate(sys.errichtetAm) : '', sys.errichtetDurch].filter(Boolean).join(' · ')],
       [label('Wartungsintervall'), m ? `alle ${m} Monate` : 'keine regelmäßige Wartung'],
       [label('Nächste Wartung fällig'), maint ? (maint.date ? fmtDate(maint.date) : 'offen') : '–'],
@@ -373,8 +373,8 @@ const PdfExport = (() => {
         [label('Betreiber (Name, Anschrift)'), wide(betreiber)],
         [label('Anlagen-Standort'), wide(standort)],
         [label('Anlagen-Nr. / Bezeichnung'), wide(systemLabel(sys))],
-        [label('Anlagentyp (z. B. Kaltwassersatz, VRF, Kühlzelle)'), wide([sys.typ, ...Store.get().systems
-          .filter((x) => x.kaelteAnlage === sys.id).map((x) => `Kältekreis der Wärmepumpe ${systemLabel(x)}`)].filter(Boolean).join(' · '))],
+        [label('Anlagentyp (z. B. Kaltwassersatz, VRF, Kühlzelle)'), wide([sys.typ, ...Areas.heatPumpsOf(sys.id)
+          .map((h) => `Kältekreis der Wärmepumpe ${systemLabel(h.wp)}${h.count > 1 ? ` (Außengerät ${h.nr})` : ''}`)].filter(Boolean).join(' · '))],
         [label('Hersteller / Modell / Serien-Nr.'), wide(geraet)],
         [label('Kältemittel (z. B. R-410A)'), sys.kaeltemittel || '', label('GWP-Wert'), fmtNum(sys.gwp, 3)],
         [label('Füllmenge (kg)'), fmtNum(sys.fuellmenge, 3), label('CO2-Äquivalent (t) = kg × GWP ÷ 1.000'), isFinite(t) ? fmtNum(t, 2) + ' t' : ''],

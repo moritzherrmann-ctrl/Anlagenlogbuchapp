@@ -470,9 +470,15 @@ function viewSystemForm(id, q) {
   const locOptions = Store.locationsOf(c.id).map((x) => [x.id, locationTitle(x) + (x.name && customerAddress(x) ? ' – ' + customerAddress(x) : '')]);
   // Aufruf aus einer Wärmepumpe („Kälteanlage anlegen und verbinden“): Daten übernehmen
   const wp = !s && q.get('verbinden') ? Store.system(q.get('verbinden')) : null;
+  const wpUnits = wp ? wp.aussengeraete || [] : [];
+  const unitIdx = Math.max(0, wpUnits.findIndex((u) => u.id === q.get('geraet')));
+  const unit = wpUnits[unitIdx] || {};
   const v = s || {
     locationId: l.id,
-    ...(wp ? { bezeichnung: `Kältekreis ${wp.bezeichnung || ''}`.trim(), typ: 'Wärmepumpe', hersteller: wp.hersteller, modell: wp.modell, seriennr: wp.seriennr, aufstellort: wp.aufstellort, errichtetAm: wp.errichtetAm } : {}),
+    ...(wp ? {
+      bezeichnung: `Kältekreis ${wp.bezeichnung || ''}${wpUnits.length > 1 ? ` – Außengerät ${unitIdx + 1}` : ''}`.trim(),
+      typ: 'Wärmepumpe', hersteller: unit.hersteller, modell: unit.modell, seriennr: unit.seriennr, aufstellort: wp.aufstellort, errichtetAm: wp.errichtetAm,
+    } : {}),
     kaeltemittel: '',
     wartungsintervall: '12',
     leckageSystem: 'nein',
@@ -482,7 +488,7 @@ function viewSystemForm(id, q) {
   render(`
     ${crumbs({ c, l, s })}
     <h1>${s ? 'Anlage bearbeiten' : 'Neue Anlage'}</h1>
-    ${wp ? `<div class="notice">Kältekreis für die Wärmepumpe <strong>${esc(systemTitle(wp))}</strong> – wird nach dem Speichern automatisch verbunden.</div>` : ''}
+    ${wp ? `<div class="notice">Kältekreis für die Wärmepumpe <strong>${esc(systemTitle(wp))}</strong>${wpUnits.length > 1 ? ` (Außengerät ${unitIdx + 1})` : ''} – wird nach dem Speichern automatisch verbunden.</div>` : ''}
     <form id="f">
       <fieldset class="card">
         <legend>Anlage</legend>
@@ -571,7 +577,8 @@ function viewSystemForm(id, q) {
     Store.noteSystemNumber(c.id, d.anlagenNr, 'kaelte');
     const saved = await Store.upsert('systems', { ...d, id: id || undefined, customerId: c.id });
     if (wp) {
-      await Store.upsert('systems', { id: wp.id, kaelteAnlage: saved.id });
+      const units = wpUnits.length ? wpUnits.map((u, i) => (i === unitIdx ? { ...u, kaelteAnlage: saved.id } : u)) : [{ id: `${wp.id}-1`, kaelteAnlage: saved.id }];
+      await Store.upsert('systems', { id: wp.id, aussengeraete: units });
       toast('Kälteanlage angelegt und mit der Wärmepumpe verbunden');
       go('#/anlage/' + saved.id);
       return;
@@ -616,7 +623,7 @@ function viewSystem(id) {
         <dt>Betreiber</dt><dd>${esc(c.name)}${customerAddress(c) ? ', ' + esc(customerAddress(c)) : ''}</dd>
         <dt>Standort</dt><dd>${esc(locationText(l, s)) || '–'}</dd>
         <dt>Anlagentyp</dt><dd>${esc(s.typ) || '–'}</dd>
-        ${heatPumpsOf(s).map((w) => `<dt>Kältekreis der Wärmepumpe</dt><dd><a href="#/anlage/${w.id}">🔥 ${esc(systemTitle(w))}</a></dd>`).join('')}
+        ${Areas.heatPumpsOf(s.id).map((h) => `<dt>Kältekreis der Wärmepumpe</dt><dd><a href="#/anlage/${h.wp.id}">🔥 ${esc(systemTitle(h.wp))}</a>${h.count > 1 ? ` · Außengerät ${h.nr}` : ''}</dd>`).join('')}
         ${s.hersteller || s.modell || s.seriennr ? `<dt>Hersteller / Modell / S/N</dt><dd>${esc([s.hersteller, s.modell, s.seriennr].filter(Boolean).join(' / '))}</dd>` : ''}
         <dt>Kältemittel</dt><dd>${esc(s.kaeltemittel) || '–'} (GWP ${fmtNum(s.gwp, 3) || '–'})</dd>
         <dt>Füllmenge</dt><dd>${fmtNum(s.fuellmenge, 3) || '–'} kg</dd>
@@ -675,9 +682,6 @@ function bindPdfButtons(id, s) {
     }
   });
 }
-
-/** Wärmepumpen (Heizung), deren Kältekreis diese Kälteanlage ist. */
-const heatPumpsOf = (kaelte) => Store.get().systems.filter((x) => x.kaelteAnlage === kaelte.id && Areas.of(x) === 'heizung');
 
 /** Kältemittel-Bilanz je Jahr als Tabelle. */
 function balanceCard(bal) {
